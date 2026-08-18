@@ -1,0 +1,24 @@
+{
+  "name": "Khishgee's Salon — үс, хумсны бүтээгдэхүүн",
+  "short_name": "Khishgee's",
+  "description": "Мэргэжлийн үс, хумсны бүтээгдэхүүн. Улаанбаатар хотод 24 цагт хүргэнэ.",
+  "lang": "mn",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fdf8f5",
+  "theme_color": "#7b2e52",
+  "categories": ["shopping", "beauty"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Каталог", "url": "/catalog", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Миний сагс", "url": "/cart", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Захиалга шалгах", "url": "/track", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

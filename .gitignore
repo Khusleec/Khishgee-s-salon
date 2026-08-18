@@ -1,0 +1,6 @@
+node_modules/
+.env
+data/salon.db
+data/salon.db-shm
+data/salon.db-wal
+data/uploads/
