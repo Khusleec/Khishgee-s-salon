@@ -6,7 +6,7 @@ import * as seed from './seed-data.ts';
 import type { CategoryRow, ProductRow, UserRow } from './types.ts';
 
 // KS_DATA_DIR — тест болон тусдаа байршуулалтад өөр хавтас заах боломж
-const DATA_DIR = process.env.KS_DATA_DIR || path.join(process.cwd(), 'data');
+import { dataDir as DATA_DIR } from './config.ts';
 // turbopackIgnore: ажиллах үеийн өгөгдлийн хавтас тул build-д мөрдөх шаардлагагүй
 if (!fs.existsSync(/* turbopackIgnore: true */ DATA_DIR)) fs.mkdirSync(/* turbopackIgnore: true */ DATA_DIR, { recursive: true });
 

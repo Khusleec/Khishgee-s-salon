@@ -54,6 +54,12 @@ export const bool = (key: string, fallback = false): boolean => {
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 };
 
+// --------------------------- Өгөгдлийн хавтас --------------------------------
+// Vercel зэрэг serverless орчинд ажлын хавтас зөвхөн уншигдана — /tmp л бичигдэнэ.
+// Тэнд SQLite болон байршуулсан зураг түр хадгалагдана (cold start бүрт шинэчлэгдэнэ).
+export const dataDir = process.env.KS_DATA_DIR
+  || (process.env.VERCEL ? path.join('/tmp', 'ks-data') : path.join(process.cwd(), 'data'));
+
 // ------------------------------- QPay --------------------------------------
 const qpayBase = {
   username: get('QPAY_USERNAME'),
@@ -106,7 +112,7 @@ export const sms = {
 // ------------------------------ Зураг --------------------------------------
 export const uploads = {
   maxBytes: Number(get('UPLOAD_MAX_BYTES', String(5 * 1024 * 1024))),
-  dir: path.join(process.env.KS_DATA_DIR || path.join(process.cwd(), 'data'), 'uploads'),
+  dir: path.join(dataDir, 'uploads'),
 };
 
 // ---------------------------- Нууц үг сэргээх -------------------------------
