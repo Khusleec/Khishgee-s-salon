@@ -6,19 +6,20 @@
 > **Гар утас нэгдүгээрт.** Үйлчлүүлэгчид голчлон утаснаас ханддаг тул дэлгүүрийн
 > дизайн, урсгал бүхэн утсанд зориулж хийгдсэн — том дэлгэц нь өргөтгөл нь юм.
 
-**Гадаад ажиллагааны сан ашиглаагүй** — Node.js-ийн дотоод модулиуд (`node:http`, `node:sqlite`,
-`node:crypto`, `node:zlib`) дээр бүтсэн. Код бүхэлдээ **TypeScript**: сервер Node-ийн
-төрөл хасагч (type stripping)-аар `.ts` файлыг шууд ажиллуулна, харин хөтчийн скриптүүд
-(`src/client/`) `tsc`-ээр `public/` руу хөрвүүлэгдэнэ — тиймээс `typescript`-ийг татахын
-тулд нэг удаа `npm install` хийнэ.
+**Next.js + TypeScript** — UI нь React (App Router), сервер тал нь Node-ийн дотоод
+модулиуд (`node:sqlite`, `node:crypto`, `node:zlib`) дээр бүтсэн тул өгөгдлийн сан,
+зураг, QR, SMS зэрэгт гадаад үйлчилгээ, нэмэлт сан шаардлагагүй. Ажиллагааны
+хамаарал нь зөвхөн `next`, `react`, `react-dom` гурав.
 
 ---
 
 ## Эхлүүлэх
 
 ```bash
-npm install     # typescript + @types/node (зөвхөн хөгжүүлэлтийн хамаарал)
-npm start       # эхлэхдээ хөтчийн скриптүүдийг автоматаар build хийнэ
+npm install
+npm run dev      # хөгжүүлэлтийн сервер (hot reload)
+# эсвэл production:
+npm run build && npm start
 ```
 
 | Хаяг | Тайлбар |
@@ -52,12 +53,13 @@ ipconfig            # → жишээ нь 192.168.1.15
 ### Бусад команд
 
 ```bash
-npm run dev        # файл өөрчлөгдөхөд автоматаар дахин ачаална
-npm run build      # src/client доторх TS-ийг public/ руу хөрвүүлнэ
-npm run typecheck  # бүх TypeScript-ийг (сервер + клиент + тест) шалгана
+npm run dev        # Next хөгжүүлэлтийн сервер — файл өөрчлөгдөхөд шууд шинэчлэгдэнэ
+npm run build      # production build
+npm start          # production сервер (эхлээд build хийсэн байх ёстой)
+npm run typecheck  # бүх TypeScript-ийг шалгана
 npm run reset      # мэдээллийн санг устгаад жишээ өгөгдлийг шинээр ачаална
-npm test           # 76 автомат тест (тусдаа түр DB дээр — жинхэнэ өгөгдөлд хүрэхгүй)
-PORT=8080 npm start
+npm test           # автомат тест (өөрөө build хийгээд тусдаа түр DB дээр ажиллана)
+npm start -- -p 8080
 ```
 
 ---
@@ -144,39 +146,39 @@ PORT=8080 npm start
 ## Техникийн шийдэл
 
 ```
-server/          (TypeScript — Node шууд ажиллуулна, build шаардахгүй)
-  index.ts       HTTP сервер, router, статик файл, SPA fallback
-  api.ts         Бүх API endpoint (нийтийн + админ)
-  types.ts       Дундын төрлүүд — Ctx/Route + өгөгдлийн сангийн мөрүүд
-  db.ts          SQLite схем, тохиргоо, жишээ өгөгдөл
-  auth.ts        scrypt нууц үг + сешн токен
-  config.ts      .env уншигч — QPay / SMS / зураг / нууц үг сэргээх тохиргоо
-  qpay.ts        QPay v2 API (нэхэмжлэх, шалгах, callback) + mock горим
-  qr.ts          QR код үүсгэгч (байт горим, EC-M, v1–20) — гадаад сангүй
-  sms.ts         SMS илгээгч: mock / ерөнхий HTTP gateway / Twilio, outbox бүртгэл
-  uploads.ts     multipart задлагч + magic-bytes зургийн шалгалт (JPG/PNG/WebP/GIF)
-  csv.ts         CSV үүсгэгч — UTF-8 BOM, томьёо тарилгын хамгаалалт
-  images.ts      Барааны зургийг SVG-ээр үүсгэнэ
-  icons.ts       PWA дүрсийг PNG-ээр кодоор зурна (zlib + гараар угсарсан PNG)
-  seed-data.ts   Бүтээгдэхүүн, ангилал, урамшууллын өгөгдөл
-src/client/      (TypeScript эх — `npm run build` нь public/ руу хөрвүүлнэ)
-  js/app.ts      Дэлгүүрийн SPA → public/js/app.js
-  js/admin.ts    Админ SPA → public/js/admin.js
-  sw.ts          Service worker → public/sw.js
-public/
-  index.html     Дэлгүүрийн бүрхүүл + SVG icon sprite
-  admin.html     Админ бүрхүүл
-  css/app.css    Дизайн систем (өнгө, товч, карт, форм)
-  css/mobile.css Гар утасны давхарга — дэлгүүрийн гол туршлага
-  css/admin.css  Админы нэмэлт хэсэг
-  css/admin-mobile.css  Админы гар утасны давхарга (хүснэгт → карт)
-  js/ + sw.js    Хөрвүүлсэн гаралт (git-д орохгүй)
-  manifest.webmanifest
-data/salon.db    SQLite сан (автоматаар үүснэ)
-data/uploads/    Байршуулсан барааны зураг
-test/            Автомат тест (qr · api · ui) — npm test
-tsconfig*.json   TS тохиргоо: сервер/тест · app · admin · sw
-.env.example     Тохиргооны загвар — .env болгож хуулна
+app/                         Next.js App Router
+  layout.tsx                 Үндсэн layout — глобал CSS, PWA, service worker
+  (shop)/                    Дэлгүүрийн React хуудсууд (нүүр, каталог, бараа,
+                             сагс, захиалга, хянах, нэвтрэх, профайл ...)
+  admin/                     Админ самбарын React хуудсууд
+  api/[[...route]]/route.ts  Бүх /api/* хүсэлтийг lib/api.ts руу дамжуулна
+  img/[...path]/route.ts     Барааны SVG + байршуулсан зураг
+  icons/[...path]/route.ts   PWA дүрс (кодоор зурсан PNG)
+components/
+  shop/                      Дэлгүүрийн компонент, сагсны context, api туслах
+  admin/                     Админы компонент
+lib/                         Серверийн логик (Node шууд ажиллуулж чадна)
+  api.ts                     Бүх API endpoint-ийн логик (нийтийн + админ)
+  dispatch.ts                Web Request → маршрутын хүснэгт тохируулагч
+  types.ts                   Дундын төрлүүд — Ctx/Route + DB мөрүүд
+  db.ts                      SQLite схем, тохиргоо, жишээ өгөгдөл
+  auth.ts                    scrypt нууц үг + сешн токен
+  config.ts                  .env уншигч — QPay / SMS / зураг / сэргээх тохиргоо
+  qpay.ts                    QPay v2 API (нэхэмжлэх, шалгах, callback) + mock горим
+  qr.ts                      QR код үүсгэгч (байт горим, EC-M, v1–20) — гадаад сангүй
+  sms.ts                     SMS илгээгч: mock / HTTP gateway / Twilio, outbox
+  uploads.ts                 multipart задлагч + magic-bytes зургийн шалгалт
+  csv.ts                     CSV үүсгэгч — UTF-8 BOM, томьёо тарилгын хамгаалалт
+  images.ts                  Барааны зургийг SVG-ээр үүсгэнэ
+  icons.ts                   PWA дүрсийг PNG-ээр кодоор зурна
+  seed-data.ts               Бүтээгдэхүүн, ангилал, урамшууллын өгөгдөл
+styles/                      app.css · mobile.css · admin.css · admin-mobile.css
+public/                      manifest.webmanifest, sw.js (service worker)
+scripts/reset.ts             Мэдээллийн санг шинээр ачаалагч
+data/salon.db                SQLite сан (автоматаар үүснэ)
+data/uploads/                Байршуулсан барааны зураг
+test/                        Автомат тест (qr · api · ui) — npm test
+.env.example                 Тохиргооны загвар — .env болгож хуулна
 ```
 
 ### Аюулгүй байдал

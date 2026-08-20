@@ -843,7 +843,7 @@ routes.push({
 
     let parsed: uploads.MultipartResult;
     try {
-      parsed = uploads.parseMultipart(ctx.rawBody!, ctx.req.headers['content-type'] || '');
+      parsed = uploads.parseMultipart(ctx.rawBody!, ctx.headers.get('content-type') || '');
     } catch (e) {
       return ctx.fail('Файлыг уншиж чадсангүй: ' + (e as Error).message, 400);
     }

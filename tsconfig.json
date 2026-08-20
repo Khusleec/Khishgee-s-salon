@@ -1,19 +1,47 @@
 {
-  // Сервер ба тест — Node 26 .ts файлыг шууд ажиллуулдаг тул emit хийхгүй,
-  // зөвхөн шалгалтад ашиглана (npm run typecheck).
   "compilerOptions": {
     "target": "es2023",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "lib": ["es2023"],
-    "types": ["node"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "es2023"
+    ],
+    "allowJs": false,
+    "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // lib/, scripts/, test/ доторх файлууд Node-оор шууд ажиллах тул
+    // import-ууд .ts өргөтгөлтэй (erasable syntax only)
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true,
-    "verbatimModuleSyntax": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
   },
-  "include": ["server/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "_reference"
+  ]
 }

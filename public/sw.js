@@ -1,36 +1,27 @@
 /* Khishgee's Salon — service worker
    Гар утасны сул сүлжээнд хурдан ажиллуулах зорилготой.
-   Стратеги: статик файлыг сүлжээнээс эхэлж авах, амжилтгүй бол кэшээс. */
+   Стратеги: хуудсыг сүлжээнээс эхэлж авах, амжилтгүй бол кэшээс;
+   зураг/дүрсийг кэш эхэлж. */
 
-// lib.webworker нь self-ийг ерөнхий worker гэж үздэг тул SW төрөл рүү нарийсгана
-const sw = self as unknown as ServiceWorkerGlobalScope;
+const VERSION = 'ks-v3';
 
-const VERSION = 'ks-v2';
-const SHELL = [
-  '/',
-  '/css/app.css',
-  '/js/app.js',
-  '/manifest.webmanifest',
-  '/icons/icon-192.png',
-];
-
-sw.addEventListener('install', (e: ExtendableEvent) => {
+self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(VERSION)
-      .then((c) => c.addAll(SHELL).catch(() => null))
-      .then(() => sw.skipWaiting())
+      .then((c) => c.addAll(['/', '/manifest.webmanifest', '/icons/icon-192.png']).catch(() => null))
+      .then(() => self.skipWaiting())
   );
 });
 
-sw.addEventListener('activate', (e: ExtendableEvent) => {
+self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
-      .then(() => sw.clients.claim())
+      .then(() => self.clients.claim())
   );
 });
 
-sw.addEventListener('fetch', (e: FetchEvent) => {
+self.addEventListener('fetch', (e) => {
   const { request } = e;
   if (request.method !== 'GET') return;
 
@@ -47,7 +38,7 @@ sw.addEventListener('fetch', (e: FetchEvent) => {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(request, copy));
         return res;
-      }).catch(() => hit as unknown as Response))
+      }))
     );
     return;
   }
@@ -58,6 +49,6 @@ sw.addEventListener('fetch', (e: FetchEvent) => {
       const copy = res.clone();
       caches.open(VERSION).then((c) => c.put(request, copy));
       return res;
-    }).catch(() => caches.match(request).then((hit) => hit || caches.match('/') as Promise<Response>))
+    }).catch(() => caches.match(request).then((hit) => hit || caches.match('/')))
   );
 });

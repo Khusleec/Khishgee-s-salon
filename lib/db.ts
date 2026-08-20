@@ -6,10 +6,15 @@ import * as seed from './seed-data.ts';
 import type { CategoryRow, ProductRow, UserRow } from './types.ts';
 
 // KS_DATA_DIR — тест болон тусдаа байршуулалтад өөр хавтас заах боломж
-const DATA_DIR = process.env.KS_DATA_DIR || path.join(import.meta.dirname, '..', 'data');
+const DATA_DIR = process.env.KS_DATA_DIR || path.join(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-export const db = new DatabaseSync(path.join(DATA_DIR, 'salon.db'));
+// Next dev горимд модуль дахин ачаалагдах бүрт шинэ холболт үүсгэхгүйн тулд
+// холболтоо globalThis дээр нэг удаа хадгална.
+const g = globalThis as typeof globalThis & { __ksDb?: DatabaseSync; __ksDbInit?: boolean };
+
+export const db = g.__ksDb ?? new DatabaseSync(path.join(DATA_DIR, 'salon.db'));
+g.__ksDb = db;
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 
@@ -372,4 +377,15 @@ export function seedDatabase(): boolean {
   }
 
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Эхлүүлэх — процесст нэг л удаа: анхны өгөгдөл + хуучирсан сешн цэвэрлэгч
+// ---------------------------------------------------------------------------
+if (!g.__ksDbInit) {
+  g.__ksDbInit = true;
+  if (seedDatabase()) console.log('✔ Мэдээллийн сан үүсгэж, жишээ өгөгдөл ачааллаа.');
+  setInterval(() => {
+    db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
+  }, 3600_000).unref();
 }

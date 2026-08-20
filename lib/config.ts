@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const ENV_PATH = path.join(import.meta.dirname, '..', '.env');
+export const ENV_PATH = path.join(process.cwd(), '.env');
 
 function parseEnv(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -106,7 +106,7 @@ export const sms = {
 // ------------------------------ Зураг --------------------------------------
 export const uploads = {
   maxBytes: Number(get('UPLOAD_MAX_BYTES', String(5 * 1024 * 1024))),
-  dir: path.join(process.env.KS_DATA_DIR || path.join(import.meta.dirname, '..', 'data'), 'uploads'),
+  dir: path.join(process.env.KS_DATA_DIR || path.join(process.cwd(), 'data'), 'uploads'),
 };
 
 // ---------------------------- Нууц үг сэргээх -------------------------------

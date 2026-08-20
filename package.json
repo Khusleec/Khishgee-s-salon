@@ -1,25 +1,29 @@
 {
   "name": "khishgee-salon",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Khishgee's Salon — үс, хумсны бүтээгдэхүүний онлайн дэлгүүр",
+  "description": "Khishgee's Salon — үс, хумсны бүтээгдэхүүний онлайн дэлгүүр (Next.js)",
   "type": "module",
-  "main": "server/index.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.app.json && tsc -p tsconfig.admin.json && tsc -p tsconfig.sw.json",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.admin.json --noEmit && tsc -p tsconfig.sw.json --noEmit",
-    "prestart": "npm run build",
-    "start": "node server/index.ts",
-    "predev": "npm run build",
-    "dev": "node --watch server/index.ts",
-    "reset": "node server/reset.ts",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc",
+    "reset": "node scripts/reset.ts",
     "test": "node test/run.ts"
   },
   "engines": {
     "node": ">=23.6.0"
   },
+  "dependencies": {
+    "next": "^16.3.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "typescript": "^7.0.2"
   }
 }

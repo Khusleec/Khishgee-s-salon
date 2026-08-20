@@ -1,6 +1,7 @@
 // Frontend logic test without a real browser: exercise the exact template
 // functions and API-driven flows the SPA runs, verifying the rendered HTML
 // contains the new UI. This proves wiring, not pixels.
+export {}; // top-level await шаардлагаар модуль болгоно
 const BASE = process.env.KS_TEST_BASE || 'http://localhost:3000';
 let pass = 0, fail = 0;
 const ok = (n: string, c: unknown, d = ''): void => {
@@ -20,20 +21,20 @@ async function api(method: string, path: string, body?: unknown, as = 'anon',
   return { status: res.status, data: ct.includes('json') ? await res.json() : await res.text(), res };
 }
 
-console.log('\n== Static assets serve the new code ==');
-const appJs = (await api('GET', '/js/app.js')).data;
-ok('app.js: qpayPanel + mountQpay present', appJs.includes('function qpayPanel') && appJs.includes('async function mountQpay'));
-ok('app.js: openForgot flow present', appJs.includes('function openForgot') && appJs.includes('/api/auth/forgot') && appJs.includes('/api/auth/reset'));
-ok('app.js: gallery thumbs use p.images', appJs.includes('data-img=') && appJs.includes('p.images.map'));
-ok('app.js: track page mounts QPay', appJs.split('mountQpay(order)').length >= 3);
-const admJs = (await api('GET', '/js/admin.js')).data;
-ok('admin.js: 4 new pages registered', ['pagePayments', 'pageSms', 'pageReports', 'pageIntegrations'].every((f) => admJs.includes(`async function ${f}`)) && admJs.includes('payments: pagePayments'));
-ok('admin.js: photo manager wired into product form', admJs.includes('function mountPhotoManager') && admJs.includes('mountPhotoManager(v.id'));
-ok('admin.js: NAV has new entries', ['payments', 'sms', 'reports', 'integrations'].every((k) => admJs.includes(`key: '${k}'`)));
-const appCss = (await api('GET', '/css/app.css')).data;
-ok('app.css: qpay styles', appCss.includes('.qpay-qr'));
-const admCss = (await api('GET', '/css/admin.css')).data;
-ok('admin.css: photo + env styles', admCss.includes('.photo-drop') && admCss.includes('.env-block'));
+console.log('\n== Next.js pages render ==');
+for (const [route, marker] of [
+  ['/', 'Khishgee'],
+  ['/catalog', 'Khishgee'],
+  ['/product/22', 'Khishgee'],
+  ['/track', 'Khishgee'],
+  ['/admin', 'Khishgee'],
+] as [string, string][]) {
+  const r = await api('GET', route);
+  const html = String(r.data);
+  const broken = html.includes('Unhandled Runtime Error') || html.includes('__next_error__');
+  ok(`page ${route} renders`, r.status === 200 && html.includes(marker) && !broken,
+    `status=${r.status}${broken ? ' (error page)' : ''}`);
+}
 
 console.log('\n== Product API shape matches what UI expects ==');
 const p = (await api('GET', '/api/products/22')).data.product;
@@ -78,10 +79,10 @@ const admProd = (await api('GET', '/api/admin/products', null, 'admin')).data.it
 ok('admin product rows include images[] for photo manager', Array.isArray(admProd.images));
 
 console.log('\n== HTML shells ==');
-const idx = (await api('GET', '/')).data;
-const adm = (await api('GET', '/admin')).data;
-ok('index.html loads app.js', idx.includes('js/app.js'));
-ok('admin.html loads admin.js', adm.includes('js/admin.js'));
+const idx = String((await api('GET', '/')).data);
+const adm = String((await api('GET', '/admin')).data);
+ok('storefront shell is a Next page with app chunks', idx.includes('/_next/'));
+ok('admin shell is a Next page with app chunks', adm.includes('/_next/'));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 console.log('CLEANUP', JSON.stringify({ code: o.code }));

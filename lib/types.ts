@@ -2,13 +2,13 @@
 // Дундын төрлүүд — HTTP контекст, маршрут, өгөгдлийн сангийн мөрүүд
 // ---------------------------------------------------------------------------
 
-import type { IncomingMessage, ServerResponse } from 'node:http';
-
 // ------------------------------- HTTP ---------------------------------------
+// Next.js route handler-ууд web Request/Response ашигладаг тул Ctx нь
+// тэдгээр дээр суурилна (lib/dispatch.ts үүсгэнэ).
 export interface Ctx {
-  req: IncomingMessage;
-  res: ServerResponse;
   url: URL;
+  /** Хүсэлтийн толгойнууд (web Headers) */
+  headers: Headers;
   query: Record<string, string>;
   cookies: Record<string, string>;
   params: Record<string, string>;

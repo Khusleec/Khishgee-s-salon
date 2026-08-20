@@ -1,7 +1,7 @@
 // Round-trip check: decode qr.ts output back to the original string.
 // Verifies data placement, masking, format info, block interleaving.
 
-import * as qr from '../server/qr.ts';
+import * as qr from '../lib/qr.ts';
 
 function readFormat(matrix: number[][], _size: number): { ecLevel: number; maskId: number; raw: number } {
   // read the copy along row 8 / column 8 (primary copy)

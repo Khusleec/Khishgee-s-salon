@@ -1,5 +1,5 @@
 // End-to-end backend test of the 5 new features against the running server.
-import * as csvMod from '../server/csv.ts';
+import * as csvMod from '../lib/csv.ts';
 
 const BASE = process.env.KS_TEST_BASE || 'http://localhost:3000';
 let pass = 0, fail = 0;

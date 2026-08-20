@@ -5,6 +5,10 @@ data/salon.db-shm
 data/salon.db-wal
 data/uploads/
 
-# TypeScript build гаралт (src/client -> public)
-public/js/
-public/sw.js
+# Next.js
+.next/
+out/
+*.tsbuildinfo
+
+# Түр ажлын файлууд
+_reference/
