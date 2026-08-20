@@ -7,7 +7,8 @@ import type { CategoryRow, ProductRow, UserRow } from './types.ts';
 
 // KS_DATA_DIR — тест болон тусдаа байршуулалтад өөр хавтас заах боломж
 const DATA_DIR = process.env.KS_DATA_DIR || path.join(process.cwd(), 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+// turbopackIgnore: ажиллах үеийн өгөгдлийн хавтас тул build-д мөрдөх шаардлагагүй
+if (!fs.existsSync(/* turbopackIgnore: true */ DATA_DIR)) fs.mkdirSync(/* turbopackIgnore: true */ DATA_DIR, { recursive: true });
 
 // Next dev горимд модуль дахин ачаалагдах бүрт шинэ холболт үүсгэхгүйн тулд
 // холболтоо globalThis дээр нэг удаа хадгална.
