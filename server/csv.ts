@@ -1,5 +1,3 @@
-'use strict';
-
 // ---------------------------------------------------------------------------
 // CSV үүсгэгч
 //
@@ -10,9 +8,11 @@
 //     ажиллуулдаг (CSV injection). Тийм утгыг цэг таслалаар хамгаална.
 // ---------------------------------------------------------------------------
 
-const BOM = '\uFEFF';
+export const BOM = '\uFEFF';
 
-function cell(value) {
+export type CsvValue = string | number | null | undefined;
+
+export function cell(value: CsvValue): string {
   if (value == null) return '';
   let s = String(value);
 
@@ -25,26 +25,24 @@ function cell(value) {
 }
 
 /**
- * @param {string[]} headers  толгой мөр
- * @param {Array<Array>} rows өгөгдлийн мөрүүд
- * @param {string} sep        Excel-ийн монгол/орос локальд ";" илүү тохирдог
+ * @param headers толгой мөр
+ * @param rows    өгөгдлийн мөрүүд
+ * @param sep     Excel-ийн монгол/орос локальд ";" илүү тохирдог
  */
-function build(headers, rows, sep = ',') {
+export function build(headers: string[], rows: CsvValue[][], sep = ','): string {
   const lines = [headers.map(cell).join(sep)];
   for (const row of rows) lines.push(row.map(cell).join(sep));
   // CRLF — Excel-д хамгийн найдвартай
   return BOM + lines.join('\r\n') + '\r\n';
 }
 
-function toBuffer(headers, rows, sep) {
+export function toBuffer(headers: string[], rows: CsvValue[][], sep?: string): Buffer {
   return Buffer.from(build(headers, rows, sep), 'utf8');
 }
 
 // Файлын нэрийг header-т аюулгүй байдлаар суулгана
-function contentDisposition(filename) {
+export function contentDisposition(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
   const encoded = encodeURIComponent(filename);
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
-
-module.exports = { build, toBuffer, cell, contentDisposition, BOM };

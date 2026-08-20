@@ -1,20 +1,18 @@
-'use strict';
-
-const crypto = require('node:crypto');
+import crypto from 'node:crypto';
 
 const SCRYPT_OPTS = { N: 16384, r: 8, p: 1 };
 const KEYLEN = 32;
 
-function hashPassword(password) {
+export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
   const hash = crypto.scryptSync(String(password), salt, KEYLEN, SCRYPT_OPTS);
   return `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
 }
 
-function verifyPassword(password, stored) {
+export function verifyPassword(password: string, stored: string): boolean {
   try {
     const [algo, saltHex, hashHex] = String(stored).split('$');
-    if (algo !== 'scrypt') return false;
+    if (algo !== 'scrypt' || !saltHex || !hashHex) return false;
     const salt = Buffer.from(saltHex, 'hex');
     const expected = Buffer.from(hashHex, 'hex');
     const actual = crypto.scryptSync(String(password), salt, expected.length, SCRYPT_OPTS);
@@ -24,6 +22,4 @@ function verifyPassword(password, stored) {
   }
 }
 
-const newToken = () => crypto.randomBytes(32).toString('hex');
-
-module.exports = { hashPassword, verifyPassword, newToken };
+export const newToken = (): string => crypto.randomBytes(32).toString('hex');

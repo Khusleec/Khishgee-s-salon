@@ -1,9 +1,50 @@
-'use strict';
+// ---------------------------------------------------------------------------
+// Жишээ өгөгдлийн төрлүүд
+// ---------------------------------------------------------------------------
+export type SeedCategory = {
+  slug: string;
+  name: string;
+  kind: 'hair' | 'nail';
+  icon: string;
+  sort: number;
+};
+
+export type SeedProduct = {
+  sku: string;
+  name: string;
+  brand: string;
+  category: string;
+  price: number;
+  compare_price?: number;
+  stock: number;
+  hue: number;
+  shape: string;
+  badge?: string;
+  rating: number;
+  sold: number;
+  volume?: string;
+  short?: string;
+  description?: string;
+  howto?: string;
+  ingredients?: string;
+};
+
+export type SeedPromo = {
+  code: string;
+  type: 'percent' | 'amount';
+  value: number;
+  min_total: number;
+  active: number;
+  note: string;
+};
+
+/** [сэтгэгдэл, үнэлгээ, нэр] */
+export type SeedReview = [string, number, string];
 
 // ---------------------------------------------------------------------------
 // Ангилал
 // ---------------------------------------------------------------------------
-const categories = [
+export const categories: SeedCategory[] = [
   { slug: 'shampoo',      name: 'Шампунь',              kind: 'hair', icon: 'bottle', sort: 1 },
   { slug: 'conditioner',  name: 'Кондиционер ба маск',  kind: 'hair', icon: 'jar',    sort: 2 },
   { slug: 'hair-care',    name: 'Үсний тос ба ийлдэс',  kind: 'hair', icon: 'drop',   sort: 3 },
@@ -20,7 +61,7 @@ const categories = [
 // ---------------------------------------------------------------------------
 // Бүтээгдэхүүн — үнэ бүгд ₮ (MNT)
 // ---------------------------------------------------------------------------
-const products = [
+export const products: SeedProduct[] = [
   // ---- Шампунь ----
   { sku: 'SH-001', name: 'Кератин сэргээгч шампунь 500мл', brand: 'Lumière Pro', category: 'shampoo',
     price: 68000, compare_price: 82000, stock: 46, hue: 268, shape: 'bottle', badge: 'Хямдрал',
@@ -348,7 +389,7 @@ const products = [
 // ---------------------------------------------------------------------------
 // Урамшууллын код
 // ---------------------------------------------------------------------------
-const promos = [
+export const promos: SeedPromo[] = [
   { code: 'SHINE10', type: 'percent', value: 10,   min_total: 50000,  active: 1, note: 'Бүх бараанд 10% хөнгөлөлт' },
   { code: 'GOY20',   type: 'percent', value: 20,   min_total: 200000, active: 1, note: '200,000₮-с дээш захиалгад 20%' },
   { code: 'HUR8',    type: 'amount',  value: 8000, min_total: 0,      active: 1, note: 'Хүргэлтийн үнэ хасагдана' },
@@ -357,7 +398,7 @@ const promos = [
 // ---------------------------------------------------------------------------
 // Сэтгэгдлийн жишээ
 // ---------------------------------------------------------------------------
-const reviewTexts = [
+export const reviewTexts: SeedReview[] = [
   ['Маш сайхан бүтээгдэхүүн байна. Салондоо тогтмол хэрэглэж байгаа.', 5, 'Б. Сарантуяа'],
   ['Хүргэлт хурдан, савлагаа нь эмх цэгцтэй ирсэн. Баярлалаа.', 5, 'Э. Номин'],
   ['Үнэ нь бага зэрэг өндөр ч чанартаа тохирч байна.', 4, 'Г. Хулан'],
@@ -365,5 +406,3 @@ const reviewTexts = [
   ['Хэрэглээд 2 долоо хоног боллоо, одоохондоо сэтгэл хангалуун.', 4, 'Ц. Ариунаа'],
   ['Жинхэнэ бүтээгдэхүүн. Дахин захиална.', 5, 'Н. Оюунчимэг'],
 ];
-
-module.exports = { categories, products, promos, reviewTexts };

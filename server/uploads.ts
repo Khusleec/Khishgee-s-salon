@@ -1,5 +1,3 @@
-'use strict';
-
 // ---------------------------------------------------------------------------
 // Файл байршуулах — multipart/form-data задлагч + зургийн шалгалт
 //
@@ -7,32 +5,43 @@
 // огт итгэхгүй: эхний байтуудаас (magic bytes) жинхэнэ төрлийг тогтооно.
 // ---------------------------------------------------------------------------
 
-const fs = require('node:fs');
-const path = require('node:path');
-const crypto = require('node:crypto');
-const cfg = require('./config');
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import * as cfg from './config.ts';
 
-const UPLOAD_DIR = cfg.uploads.dir;
+export const UPLOAD_DIR = cfg.uploads.dir;
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // --------------------------- multipart задлагч -------------------------------
-function getBoundary(contentType = '') {
+function getBoundary(contentType = ''): string | null {
   const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
   const b = m && (m[1] || m[2]);
   return b ? b.trim() : null;
 }
 
+export type UploadedFile = {
+  field: string;
+  filename: string;
+  mime: string;
+  data: Buffer;
+};
+
+export type MultipartResult = {
+  fields: Record<string, string>;
+  files: UploadedFile[];
+};
+
 /**
  * multipart/form-data биеийг задлана.
- * @returns {{fields: object, files: Array}}
  */
-function parseMultipart(buffer, contentType) {
+export function parseMultipart(buffer: Buffer, contentType: string): MultipartResult {
   const boundary = getBoundary(contentType);
   if (!boundary) throw new Error('boundary олдсонгүй');
 
   const delim = Buffer.from('--' + boundary);
-  const fields = {};
-  const files = [];
+  const fields: Record<string, string> = {};
+  const files: UploadedFile[] = [];
 
   let pos = buffer.indexOf(delim);
   if (pos < 0) throw new Error('multipart хэлбэр буруу');
@@ -46,7 +55,7 @@ function parseMultipart(buffer, contentType) {
 
     const headerEnd = buffer.indexOf('\r\n\r\n', pos, 'utf8');
     if (headerEnd < 0) break;
-    const rawHeaders = buffer.slice(pos, headerEnd).toString('utf8');
+    const rawHeaders = buffer.subarray(pos, headerEnd).toString('utf8');
     const bodyStart = headerEnd + 4;
 
     const next = buffer.indexOf(delim, bodyStart);
@@ -54,7 +63,7 @@ function parseMultipart(buffer, contentType) {
     // Хэсгийн төгсгөлийн CRLF-ийг хасна
     let bodyEnd = next;
     if (buffer[bodyEnd - 2] === 0x0d && buffer[bodyEnd - 1] === 0x0a) bodyEnd -= 2;
-    const body = buffer.slice(bodyStart, bodyEnd);
+    const body = buffer.subarray(bodyStart, bodyEnd);
 
     const disp = /content-disposition:[^\n]*/i.exec(rawHeaders);
     const dispLine = disp ? disp[0] : '';
@@ -81,11 +90,18 @@ function parseMultipart(buffer, contentType) {
 }
 
 // ---------------------------- Зургийн шалгалт --------------------------------
+export type ImageInfo = {
+  mime: string;
+  ext: string;
+  width: number;
+  height: number;
+};
+
 /**
  * Эхний байтуудаас зургийн жинхэнэ төрөл, хэмжээг уншина.
  * Дэмжих: JPEG, PNG, WebP, GIF
  */
-function inspectImage(buf) {
+export function inspectImage(buf: Buffer): ImageInfo | null {
   if (!buf || buf.length < 16) return null;
 
   // PNG: 89 50 4E 47 0D 0A 1A 0A
@@ -99,7 +115,7 @@ function inspectImage(buf) {
     let i = 2;
     while (i < buf.length - 9) {
       if (buf[i] !== 0xff) { i++; continue; }
-      const marker = buf[i + 1];
+      const marker = buf[i + 1]!;
       // SOF0..SOF15 (SOF4, SOF8, SOF12 нь тайлбар биш)
       if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
         return {
@@ -122,8 +138,8 @@ function inspectImage(buf) {
     let width = 0;
     let height = 0;
     if (chunk === 'VP8X' && buf.length >= 30) {
-      width = 1 + (buf[24] | (buf[25] << 8) | (buf[26] << 16));
-      height = 1 + (buf[27] | (buf[28] << 8) | (buf[29] << 16));
+      width = 1 + (buf[24]! | (buf[25]! << 8) | (buf[26]! << 16));
+      height = 1 + (buf[27]! | (buf[28]! << 8) | (buf[29]! << 16));
     } else if (chunk === 'VP8 ' && buf.length >= 30) {
       width = buf.readUInt16LE(26) & 0x3fff;
       height = buf.readUInt16LE(28) & 0x3fff;
@@ -144,7 +160,15 @@ function inspectImage(buf) {
 }
 
 // ------------------------------- Хадгалах ------------------------------------
-function saveImage(file) {
+export type SavedImage = {
+  file: string;
+  mime: string;
+  width: number;
+  height: number;
+  bytes: number;
+};
+
+export function saveImage(file: UploadedFile): SavedImage {
   if (file.data.length > cfg.uploads.maxBytes) {
     const mb = Math.round(cfg.uploads.maxBytes / 1024 / 1024);
     throw new Error(`Зураг ${mb}MB-аас хэтэрч болохгүй`);
@@ -164,7 +188,7 @@ function saveImage(file) {
   };
 }
 
-function removeImage(name) {
+export function removeImage(name: string): boolean {
   // Зам гарахаас хамгаална — зөвхөн файлын нэр зөвшөөрнө
   const safe = path.basename(String(name || ''));
   if (!safe || safe !== name) return false;
@@ -178,7 +202,7 @@ function removeImage(name) {
   }
 }
 
-function readImage(name) {
+export function readImage(name: string): Buffer | null {
   const safe = path.basename(String(name || ''));
   if (!safe || safe !== name) return null;
   const full = path.join(UPLOAD_DIR, safe);
@@ -190,12 +214,10 @@ function readImage(name) {
   }
 }
 
-const MIME_BY_EXT = {
+export const MIME_BY_EXT: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
 };
-
-module.exports = { parseMultipart, inspectImage, saveImage, removeImage, readImage, MIME_BY_EXT, UPLOAD_DIR };

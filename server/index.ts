@@ -1,18 +1,17 @@
-'use strict';
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
-const http = require('node:http');
-const fs = require('node:fs');
-const path = require('node:path');
-const { URL } = require('node:url');
-
-const { db, seedDatabase } = require('./db');
-const routes = require('./api');
-const config = require('./config');
+import { db, seedDatabase } from './db.ts';
+import routes from './api.ts';
+import * as config from './config.ts';
+import type { Ctx, Route } from './types.ts';
 
 const PORT = Number(process.env.PORT || 3000);
-const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const PUBLIC_DIR = path.join(import.meta.dirname, '..', 'public');
 
-const MIME = {
+const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -29,8 +28,8 @@ const MIME = {
 // ---------------------------------------------------------------------------
 // Туслах
 // ---------------------------------------------------------------------------
-function parseCookies(header = '') {
-  const out = {};
+function parseCookies(header = ''): Record<string, string> {
+  const out: Record<string, string> = {};
   for (const part of header.split(';')) {
     const i = part.indexOf('=');
     if (i < 0) continue;
@@ -39,11 +38,11 @@ function parseCookies(header = '') {
   return out;
 }
 
-function readBody(req, limit = 1024 * 512) {
+function readBody(req: IncomingMessage, limit = 1024 * 512): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     let size = 0;
-    const chunks = [];
-    req.on('data', (c) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => {
       size += c.length;
       if (size > limit) { reject(new Error('too-large')); req.destroy(); return; }
       chunks.push(c);
@@ -53,21 +52,23 @@ function readBody(req, limit = 1024 * 512) {
   });
 }
 
-function compile(pattern) {
-  const keys = [];
-  const rx = new RegExp('^' + pattern.replace(/:([A-Za-z_]+)/g, (_, k) => {
+function compile(pattern: string): { rx: RegExp; keys: string[] } {
+  const keys: string[] = [];
+  const rx = new RegExp('^' + pattern.replace(/:([A-Za-z_]+)/g, (_, k: string) => {
     keys.push(k);
     return '([^/]+)';
   }) + '$');
   return { rx, keys };
 }
 
-const compiled = routes.map((r) => ({ ...r, ...compile(r.path) }));
+type CompiledRoute = Route & { rx: RegExp; keys: string[] };
+
+const compiled: CompiledRoute[] = routes.map((r) => ({ ...r, ...compile(r.path) }));
 
 // ---------------------------------------------------------------------------
 // Статик файл
 // ---------------------------------------------------------------------------
-function serveStatic(req, res, pathname) {
+function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string): void {
   let rel = decodeURIComponent(pathname);
   if (rel === '/') rel = '/index.html';
 
@@ -97,10 +98,10 @@ function serveStatic(req, res, pathname) {
 // Сервер
 // ---------------------------------------------------------------------------
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
 
-  const ctx = {
+  const ctx: Ctx = {
     req,
     res,
     url,
@@ -112,7 +113,7 @@ const server = http.createServer(async (req, res) => {
       const bits = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
       if (opts.maxAge != null) bits.push(`Max-Age=${opts.maxAge}`);
       const prev = res.getHeader('Set-Cookie');
-      const list = prev ? (Array.isArray(prev) ? prev : [prev]) : [];
+      const list = prev ? (Array.isArray(prev) ? prev : [String(prev)]) : [];
       res.setHeader('Set-Cookie', [...list, bits.join('; ')]);
     },
     json(data, status = 200) {
@@ -147,7 +148,7 @@ const server = http.createServer(async (req, res) => {
           ctx.body = buf.length ? JSON.parse(buf.toString('utf8')) : {};
         }
       } catch (e) {
-        if (e.message === 'too-large') return ctx.fail('Хэт том хүсэлт', 413);
+        if ((e as Error).message === 'too-large') return ctx.fail('Хэт том хүсэлт', 413);
         ctx.body = {};
       }
     }

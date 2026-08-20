@@ -4,28 +4,89 @@
 'use strict';
 
 // ---------------------------------------------------------------------------
+// Төрлүүд (зөвхөн type-level — эмхэтгэсэн JS-д ул мөр үлдээхгүй)
+// ---------------------------------------------------------------------------
+type OrderStatus = 'new' | 'confirmed' | 'packed' | 'shipping' | 'delivered' | 'cancelled';
+type DeliveryMethod = 'ub' | 'pickup' | 'country';
+type PaymentMethod = 'cash' | 'transfer' | 'qpay';
+
+interface Category { slug: string; name: string; icon: string; kind: string; count: number; }
+interface ProductImage { url: string; }
+interface Product {
+  id: number; name: string; brand: string; sku: string;
+  price: number; compare_price?: number | null;
+  image?: string; images?: ProductImage[];
+  stock: number; rating: number; sold: number;
+  badge?: string | null; short?: string; description?: string;
+  howto?: string | null; ingredients?: string | null; volume?: string | null;
+  category_name?: string; category_slug?: string;
+}
+interface Review { name: string; rating: number; comment: string; created_at: string; }
+interface CartItem { id: number; name: string; price: number; qty: number; image: string; stock: number; }
+interface User { name: string; phone: string; email?: string; district?: string; address?: string; }
+interface Settings {
+  phone?: string; phone2?: string; email?: string; address?: string;
+  work_hours?: string; bank_account?: string; facebook?: string;
+  delivery_fee?: number; free_delivery_from?: number; country_delivery_fee?: number;
+}
+interface Promo { code: string; discount: number; note?: string; }
+interface SavedOrder { code: string; phone: string; at: number; }
+interface OrderItem { product_id: number; name: string; sku: string; price: number; qty: number; }
+interface Order {
+  code: string; status: OrderStatus; created_at: string;
+  delivery_method: DeliveryMethod; payment_method: PaymentMethod;
+  payment_status?: string; paid_at?: string | null;
+  items: OrderItem[]; subtotal: number; delivery_fee: number;
+  discount?: number; promo_code?: string; total: number;
+  customer_name: string; phone: string; district?: string; address?: string; note?: string;
+}
+interface StatusInfo { label: string; chip: string; step: number; }
+interface QpayBankLink { name: string; description?: string; logo?: string; link: string; }
+interface QpayPayment { mode?: string; qr_svg?: string; short_url?: string; urls?: QpayBankLink[]; }
+
+// API-ийн хариунууд — бүгд { ok: boolean, ... } хэлбэртэй
+interface ApiBase { ok?: boolean; error?: string; }
+interface ApiOpts extends Omit<RequestInit, 'body'> { body?: unknown; }
+interface BootstrapResponse { settings: Settings; categories: Category[]; brands: string[]; price: { min: number; max: number }; user: User | null; }
+interface ProductListResponse { items: Product[]; total: number; page: number; per: number; pages: number; }
+interface ProductDetailResponse { product: Product; reviews: Review[]; related: Product[]; }
+interface PromoCheckResponse { code: string; discount: number; note: string; }
+interface OrderCreateResponse { code: string; }
+interface OrderTrackResponse { order: Order; }
+interface MeResponse { user: User; orders: Order[]; }
+interface AuthResponse { user: User; }
+interface ForgotResponse { message: string; code?: string; }
+interface QpayCreateResponse { payment: QpayPayment; }
+interface QpayStatusResponse { order_status?: string; payment?: { status?: string }; }
+
+type Query = Record<string, string>;
+type RouteParams = Record<string, string>;
+type View = (app: HTMLElement, params: RouteParams, query: Query) => void | Promise<void>;
+interface Crumb { label: string; href?: string; }
+
+// ---------------------------------------------------------------------------
 // Туслах
 // ---------------------------------------------------------------------------
-const $ = (s, r = document) => r.querySelector(s);
-const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const $ = <E extends Element = HTMLElement>(s: string, r: ParentNode = document): E => r.querySelector<E>(s) as E;
+const $$ = <E extends Element = HTMLElement>(s: string, r: ParentNode = document): E[] => [...r.querySelectorAll<E>(s)];
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
 
-const mnt = (n) => Number(n || 0).toLocaleString('mn-MN') + '₮';
+const mnt = (n: number | string | null | undefined): string => Number(n || 0).toLocaleString('mn-MN') + '₮';
 
-const dateMn = (iso) => {
+const dateMn = (iso: string) => {
   const d = new Date(iso);
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 };
-const dateTimeMn = (iso) => {
+const dateTimeMn = (iso: string) => {
   const d = new Date(iso);
   return `${dateMn(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
-const icon = (name, size = 20) => `<svg width="${size}" height="${size}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const icon = (name: string, size = 20) => `<svg width="${size}" height="${size}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
-function stars(rating) {
+function stars(rating: number | string) {
   const r = Number(rating) || 0;
   const filled = Math.round(r);
   let out = '';
@@ -33,19 +94,19 @@ function stars(rating) {
   return `<span class="stars" aria-label="${r.toFixed(1)} оноо">${out}</span>`;
 }
 
-async function api(path, opts = {}) {
+async function api<T = ApiBase>(path: string, opts: ApiOpts = {}): Promise<T> {
   const res = await fetch(path, {
     headers: opts.body ? { 'Content-Type': 'application/json' } : {},
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  let data = {};
+  let data: ApiBase = {};
   try { data = await res.json(); } catch { /* хоосон хариу */ }
   if (!res.ok || data.ok === false) throw new Error(data.error || 'Алдаа гарлаа');
-  return data;
+  return data as T;
 }
 
-function toast(message, type = '') {
+function toast(message: string, type = '') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.innerHTML = `${type === 'ok' ? icon('check', 18) : type === 'err' ? icon('x', 18) : icon('spark', 18)}<span>${esc(message)}</span>`;
@@ -59,7 +120,7 @@ function toast(message, type = '') {
 }
 
 // Ангиллын дүрс — сангийн icon талбарыг sprite-ийн нэртэй холбоно
-const CAT_ICON = {
+const CAT_ICON: Record<string, string> = {
   bottle: 'bottle', jar: 'jar', drop: 'drop', tube: 'tube',
   spray: 'spray', tool: 'tool', polish: 'polish',
 };
@@ -67,7 +128,7 @@ const CAT_ICON = {
 const DISTRICTS = ['Багануур', 'Багахангай', 'Баянгол', 'Баянзүрх', 'Налайх',
   'Сонгинохайрхан', 'Сүхбаатар', 'Хан-Уул', 'Чингэлтэй'];
 
-const STATUS_MAP = {
+const STATUS_MAP: Record<OrderStatus, StatusInfo> = {
   new:       { label: 'Шинэ захиалга',  chip: 'chip-info',   step: 0 },
   confirmed: { label: 'Баталгаажсан',   chip: 'chip-plum',   step: 1 },
   packed:    { label: 'Савлагдсан',     chip: 'chip-gold',   step: 2 },
@@ -76,13 +137,22 @@ const STATUS_MAP = {
   cancelled: { label: 'Цуцлагдсан',     chip: 'chip-danger', step: -1 },
 };
 
-const DELIVERY_LABEL = { ub: 'Хотын хүргэлт', pickup: 'Дэлгүүрээс авах', country: 'Орон нутаг' };
-const PAYMENT_LABEL = { cash: 'Бэлнээр (хүргэлтээр)', transfer: 'Дансаар шилжүүлэх', qpay: 'QPay / картаар' };
+const DELIVERY_LABEL: Record<DeliveryMethod, string> = { ub: 'Хотын хүргэлт', pickup: 'Дэлгүүрээс авах', country: 'Орон нутаг' };
+const PAYMENT_LABEL: Record<PaymentMethod, string> = { cash: 'Бэлнээр (хүргэлтээр)', transfer: 'Дансаар шилжүүлэх', qpay: 'QPay / картаар' };
 
 // ---------------------------------------------------------------------------
 // Төлөв
 // ---------------------------------------------------------------------------
-const store = {
+const store: {
+  settings: Settings;
+  categories: Category[];
+  brands: string[];
+  price: { min: number; max: number };
+  user: User | null;
+  cart: CartItem[];
+  favs: number[];
+  promo: Promo | null;
+} = {
   settings: {},
   categories: [],
   brands: [],
@@ -97,18 +167,18 @@ const saveCart = () => { localStorage.setItem('ks_cart', JSON.stringify(store.ca
 
 // Зочноор захиалсан хүн баталгаажуулалтаа дахин үзэх боломжтой байхын тулд
 // захиалгын дугаар + утсыг зөвхөн энэ төхөөрөмж дээр хадгална.
-const myOrders = () => { try { return JSON.parse(localStorage.getItem('ks_orders') || '[]'); } catch { return []; } };
-function rememberOrder(code, phone) {
+const myOrders = (): SavedOrder[] => { try { return JSON.parse(localStorage.getItem('ks_orders') || '[]'); } catch { return []; } };
+function rememberOrder(code: string, phone: string) {
   const list = myOrders().filter((o) => o.code !== code);
   list.unshift({ code, phone, at: Date.now() });
   localStorage.setItem('ks_orders', JSON.stringify(list.slice(0, 20)));
 }
-const phoneForOrder = (code) => myOrders().find((o) => o.code === code)?.phone || '';
+const phoneForOrder = (code: string) => myOrders().find((o) => o.code === code)?.phone || '';
 const saveFavs = () => { localStorage.setItem('ks_favs', JSON.stringify(store.favs)); renderFavCount(); };
 const cartQty = () => store.cart.reduce((s, i) => s + i.qty, 0);
 const cartSubtotal = () => store.cart.reduce((s, i) => s + i.price * i.qty, 0);
 
-function addToCart(p, qty = 1) {
+function addToCart(p: Product, qty = 1) {
   const line = store.cart.find((i) => i.id === p.id);
   if (line) line.qty = Math.min(99, line.qty + qty);
   else store.cart.push({ id: p.id, name: p.name, price: p.price, qty, image: p.image || `/img/p/${p.id}.svg`, stock: p.stock });
@@ -116,7 +186,7 @@ function addToCart(p, qty = 1) {
   toast(`"${p.name}" сагсанд нэмэгдлээ`, 'ok');
 }
 
-function toggleFav(id) {
+function toggleFav(id: number) {
   const i = store.favs.indexOf(id);
   if (i >= 0) { store.favs.splice(i, 1); toast('Хадгалсанаас хаслаа'); }
   else { store.favs.push(id); toast('Хадгалсан жагсаалтад нэмэгдлээ', 'ok'); }
@@ -128,7 +198,7 @@ function toggleFav(id) {
   });
 }
 
-function deliveryFee(subtotal, method = 'ub') {
+function deliveryFee(subtotal: number, method: DeliveryMethod = 'ub') {
   if (method === 'pickup') return 0;
   if (method === 'country') return Number(store.settings.country_delivery_fee || 15000);
   return subtotal >= Number(store.settings.free_delivery_from || 150000) ? 0 : Number(store.settings.delivery_fee || 8000);
@@ -140,8 +210,8 @@ function deliveryFee(subtotal, method = 'ub') {
 const isMobile = () => window.matchMedia('(max-width: 820px)').matches;
 
 // --- Доод хуудас (bottom sheet) ---
-let sheetRestore = null;
-function openBSheet(title, bodyNode, footHtml = '') {
+let sheetRestore: (() => void) | null = null;
+function openBSheet(title: string, bodyNode: string | Node, footHtml = '') {
   $('#bsheetTitle').textContent = title;
   const body = $('#bsheetBody');
   body.innerHTML = '';
@@ -163,23 +233,23 @@ function closeBSheet() {
   if (sheetRestore) { sheetRestore(); sheetRestore = null; }
 }
 
-const routes = [];
-const route = (pattern, view) => {
-  const keys = [];
+const routes: { rx: RegExp; keys: string[]; view: View }[] = [];
+const route = (pattern: string, view: View) => {
+  const keys: string[] = [];
   const rx = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
   routes.push({ rx, keys, view });
 };
 
-function go(url, replace = false) {
+function go(url: string, replace = false) {
   history[replace ? 'replaceState' : 'pushState']({}, '', url);
   render();
 }
 
 document.addEventListener('click', (e) => {
-  const a = e.target.closest('a[data-link]');
+  const a = (e.target as Element).closest<HTMLAnchorElement>('a[data-link]');
   if (a && a.getAttribute('href')?.startsWith('/')) {
     e.preventDefault();
-    go(a.getAttribute('href'));
+    go(a.getAttribute('href')!);
   }
 });
 window.addEventListener('popstate', () => render());
@@ -192,7 +262,7 @@ async function render() {
   for (const r of routes) {
     const m = r.rx.exec(path);
     if (!m) continue;
-    const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+    const params = Object.fromEntries(r.keys.map((k, i): [string, string] => [k, decodeURIComponent(m[i + 1])]));
     closeBSheet();
     document.body.classList.remove('has-pdp-bar', 'has-checkout-bar');
     $('#fabActions').hidden = true;
@@ -201,7 +271,7 @@ async function render() {
     try {
       await r.view(app, params, query);
     } catch (err) {
-      app.innerHTML = `<div class="wrap"><div class="empty"><h2>Алдаа гарлаа</h2><p>${esc(err.message)}</p>
+      app.innerHTML = `<div class="wrap"><div class="empty"><h2>Алдаа гарлаа</h2><p>${esc((err as Error).message)}</p>
         <a class="btn" href="/" data-link>Нүүр хуудас</a></div></div>`;
     }
     syncNav(path);
@@ -211,7 +281,7 @@ async function render() {
   syncNav(path);
 }
 
-function syncNav(path) {
+function syncNav(path: string) {
   $$('#mainnav .navlink').forEach((a) => a.classList.toggle('active', a.getAttribute('href') === path + location.search));
   $$('#mobileNav a').forEach((a) => a.classList.toggle('active', a.dataset.m === path));
 }
@@ -219,7 +289,7 @@ function syncNav(path) {
 // ---------------------------------------------------------------------------
 // Дахин ашиглагдах хэсгүүд
 // ---------------------------------------------------------------------------
-function productCard(p) {
+function productCard(p: Product) {
   const off = p.compare_price && p.compare_price > p.price
     ? Math.round((1 - p.price / p.compare_price) * 100) : 0;
   const fav = store.favs.includes(p.id);
@@ -257,7 +327,7 @@ function productCard(p) {
 const skeletonGrid = (n = 8) =>
   `<div class="prod-grid">${'<div class="sk sk-card"></div>'.repeat(n)}</div>`;
 
-function crumbs(items) {
+function crumbs(items: Crumb[]) {
   return `<div class="wrap"><nav class="crumbs">` + items.map((it, i) =>
     (it.href ? `<a href="${it.href}" data-link>${esc(it.label)}</a>` : `<span>${esc(it.label)}</span>`)
     + (i < items.length - 1 ? `<span style="opacity:.5">›</span>` : '')
@@ -393,8 +463,8 @@ route('/', async (app) => {
     </a>`).join('');
 
   const [pop, fresh] = await Promise.all([
-    api('/api/products?sort=popular&per=8'),
-    api('/api/products?sort=new&per=8'),
+    api<ProductListResponse>('/api/products?sort=popular&per=8'),
+    api<ProductListResponse>('/api/products?sort=new&per=8'),
   ]);
   // Утсанд хэвтээ гүйдэг эгнээ — доош гүйлгэх хэмжээг багасгана
   $('#homePopular').innerHTML = `<div class="prod-grid prod-rail">${pop.items.map(productCard).join('')}</div>`;
@@ -489,12 +559,12 @@ route('/catalog', async (app, _p, q) => {
     </div>
   </div>`;
 
-  const update = (patch) => {
-    const next = { ...q, ...patch };
+  const update = (patch: Record<string, string | undefined>) => {
+    const next: Record<string, string | undefined> = { ...q, ...patch };
     delete next.page;
     for (const k of Object.keys(next)) if (!next[k]) delete next[k];
     closeBSheet();
-    go('/catalog' + (Object.keys(next).length ? '?' + new URLSearchParams(next) : ''));
+    go('/catalog' + (Object.keys(next).length ? '?' + new URLSearchParams(next as Record<string, string>) : ''));
   };
 
   // --- Ангиллын хэвтээ чипс (утас) ---
@@ -508,7 +578,7 @@ route('/catalog', async (app, _p, q) => {
   // --- Шүүлтүүрийн доод хуудас: жинхэнэ панелийг зөөж оруулна ---
   $('#mFilter').addEventListener('click', () => {
     const panel = $('#filters');
-    const parent = panel.parentNode;
+    const parent = panel.parentNode!;
     const anchor = panel.nextSibling;
     sheetRestore = () => parent.insertBefore(panel, anchor);
     openBSheet('Шүүлтүүр', panel, `
@@ -529,19 +599,19 @@ route('/catalog', async (app, _p, q) => {
     $$('[data-sort]').forEach((b) => b.addEventListener('click', () => update({ sort: b.dataset.sort })));
   });
 
-  $$('input[name="kind"]').forEach((r) => r.addEventListener('change', () => update({ kind: r.value, category: '' })));
-  $$('input[name="category"]').forEach((r) => r.addEventListener('change', () => update({ category: r.value })));
-  $$('input[name="brand"]').forEach((c) => c.addEventListener('change', () => {
-    const list = $$('input[name="brand"]:checked').map((x) => x.value);
+  $$<HTMLInputElement>('input[name="kind"]').forEach((r) => r.addEventListener('change', () => update({ kind: r.value, category: '' })));
+  $$<HTMLInputElement>('input[name="category"]').forEach((r) => r.addEventListener('change', () => update({ category: r.value })));
+  $$<HTMLInputElement>('input[name="brand"]').forEach((c) => c.addEventListener('change', () => {
+    const list = $$<HTMLInputElement>('input[name="brand"]:checked').map((x) => x.value);
     update({ brand: list.join(',') });
   }));
-  $('#applyPrice').addEventListener('click', () => update({ min: $('#fMin').value, max: $('#fMax').value }));
-  $('#fSale').addEventListener('change', (e) => update({ sale: e.target.checked ? '1' : '' }));
+  $('#applyPrice').addEventListener('click', () => update({ min: $<HTMLInputElement>('#fMin').value, max: $<HTMLInputElement>('#fMax').value }));
+  $('#fSale').addEventListener('change', (e) => update({ sale: (e.target as HTMLInputElement).checked ? '1' : '' }));
   $('#clearFilters').addEventListener('click', () => go('/catalog'));
-  $('#sortSel').addEventListener('change', (e) => update({ sort: e.target.value }));
+  $('#sortSel').addEventListener('change', (e) => update({ sort: (e.target as HTMLSelectElement).value }));
 
   // Идэвхтэй шүүлтүүрийн шошго
-  const tags = [];
+  const tags: [string, string][] = [];
   if (q.kind) tags.push(['kind', q.kind === 'hair' ? 'Үсний' : 'Хумсны']);
   if (cat) tags.push(['category', cat.name]);
   selBrands.forEach((b) => tags.push(['brand:' + b, b]));
@@ -552,7 +622,7 @@ route('/catalog', async (app, _p, q) => {
   $('#activeFilters').innerHTML = tags.map(([k, l]) =>
     `<span class="filter-tag">${esc(l)}<button data-rm="${esc(k)}" aria-label="Хасах">×</button></span>`).join('');
   $$('#activeFilters button').forEach((b) => b.addEventListener('click', () => {
-    const key = b.dataset.rm;
+    const key = b.dataset.rm!;
     if (key.startsWith('brand:')) {
       const left = selBrands.filter((x) => x !== key.slice(6));
       update({ brand: left.join(',') });
@@ -560,7 +630,7 @@ route('/catalog', async (app, _p, q) => {
   }));
 
   const params = new URLSearchParams({ per: '12', ...q });
-  const data = await api('/api/products?' + params);
+  const data = await api<ProductListResponse>('/api/products?' + params);
 
   $('#resultCount').textContent = data.total
     ? `Нийт ${data.total} бүтээгдэхүүнээс ${(data.page - 1) * data.per + 1}–${Math.min(data.page * data.per, data.total)} харуулж байна`
@@ -573,7 +643,7 @@ route('/catalog', async (app, _p, q) => {
        <button class="btn btn-outline" onclick="location.href='/catalog'">Шүүлтүүр цэвэрлэх</button></div>`;
 
   if (data.pages > 1) {
-    const btn = (n, label = n, on = false, dis = false) =>
+    const btn = (n: number, label: string | number = n, on = false, dis = false) =>
       `<button data-page="${n}" class="${on ? 'on' : ''}" ${dis ? 'disabled' : ''}>${label}</button>`;
     let html = btn(data.page - 1, '‹', false, data.page === 1);
     for (let i = 1; i <= data.pages; i++) {
@@ -583,7 +653,7 @@ route('/catalog', async (app, _p, q) => {
     html += btn(data.page + 1, '›', false, data.page === data.pages);
     $('#pager').innerHTML = html;
     $$('#pager button[data-page]').forEach((b) => b.addEventListener('click', () => {
-      go('/catalog?' + new URLSearchParams({ ...q, page: b.dataset.page }));
+      go('/catalog?' + new URLSearchParams({ ...q, page: b.dataset.page! }));
     }));
   }
 });
@@ -593,7 +663,7 @@ route('/catalog', async (app, _p, q) => {
 // ---------------------------------------------------------------------------
 route('/product/:id', async (app, params) => {
   app.innerHTML = `<div class="wrap" style="padding-block:40px">${skeletonGrid(2)}</div>`;
-  const { product: p, reviews, related } = await api('/api/products/' + params.id);
+  const { product: p, reviews, related } = await api<ProductDetailResponse>('/api/products/' + params.id);
 
   const off = p.compare_price && p.compare_price > p.price
     ? Math.round((1 - p.price / p.compare_price) * 100) : 0;
@@ -601,7 +671,7 @@ route('/product/:id', async (app, params) => {
 
   app.innerHTML = `
   ${crumbs([{ label: 'Нүүр', href: '/' }, { label: 'Каталог', href: '/catalog' },
-    { label: p.category_name, href: '/catalog?category=' + p.category_slug }, { label: p.name }])}
+    { label: p.category_name!, href: '/catalog?category=' + p.category_slug }, { label: p.name }])}
 
   <div class="wrap" style="padding-bottom:50px">
     <div class="pdp">
@@ -754,20 +824,20 @@ route('/product/:id', async (app, params) => {
   // Ширхгийн тоог хоёр удирдлагын хооронд синк болгоно
   let qty = 1;
   const maxQty = Math.max(1, p.stock);
-  const syncQty = (v) => {
+  const syncQty = (v: number) => {
     qty = Math.min(maxQty, Math.max(1, v || 1));
-    const a = $('#qInput'), b = $('#qInputM'), t = $('#barTotal');
-    if (a) a.value = qty;
-    if (b) b.value = qty;
+    const a = $<HTMLInputElement>('#qInput'), b = $<HTMLInputElement>('#qInputM'), t = $('#barTotal');
+    if (a) a.value = qty as any;
+    if (b) b.value = qty as any;
     if (t) t.textContent = mnt(p.price * qty);
   };
 
   $('#qMinus').addEventListener('click', () => syncQty(qty - 1));
   $('#qPlus').addEventListener('click', () => syncQty(qty + 1));
-  $('#qInput').addEventListener('change', (e) => syncQty(+e.target.value));
+  $('#qInput').addEventListener('change', (e) => syncQty(+(e.target as HTMLInputElement).value));
   $('#qMinusM')?.addEventListener('click', () => syncQty(qty - 1));
   $('#qPlusM')?.addEventListener('click', () => syncQty(qty + 1));
-  $('#qInputM')?.addEventListener('change', (e) => syncQty(+e.target.value));
+  $('#qInputM')?.addEventListener('change', (e) => syncQty(+(e.target as HTMLInputElement).value));
 
   $('#addBtn').addEventListener('click', () => addToCart(p, qty));
   $('#addBtnM')?.addEventListener('click', () => addToCart(p, qty));
@@ -781,7 +851,7 @@ route('/product/:id', async (app, params) => {
     b.addEventListener('click', () => {
       $$('.pdp-thumbs button').forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
-      $('#pdpImg').src = b.dataset.img;
+      $<HTMLImageElement>('#pdpImg').src = b.dataset.img!;
     }));
 
   $$('.tab').forEach((t) => t.addEventListener('click', () => {
@@ -792,15 +862,15 @@ route('/product/:id', async (app, params) => {
 
   $('#revForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
+    const f = new FormData(e.target as HTMLFormElement);
     try {
       await api(`/api/products/${p.id}/reviews`, {
         method: 'POST',
-        body: { name: f.get('name'), rating: +f.get('rating'), comment: f.get('comment') },
+        body: { name: f.get('name'), rating: +(f.get('rating') as string), comment: f.get('comment') },
       });
       toast('Сэтгэгдэл нэмэгдлээ. Баярлалаа!', 'ok');
       render();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err) { toast((err as Error).message, 'err'); }
   });
 });
 
@@ -854,15 +924,15 @@ route('/cart', async (app) => {
   </div>`;
 
   $$('[data-inc]').forEach((b) => b.addEventListener('click', () => {
-    const it = store.cart.find((x) => x.id === +b.dataset.inc); it.qty = Math.min(99, it.qty + 1); saveCart(); render();
+    const it = store.cart.find((x) => x.id === +b.dataset.inc!)!; it.qty = Math.min(99, it.qty + 1); saveCart(); render();
   }));
   $$('[data-dec]').forEach((b) => b.addEventListener('click', () => {
-    const it = store.cart.find((x) => x.id === +b.dataset.dec);
+    const it = store.cart.find((x) => x.id === +b.dataset.dec!)!;
     it.qty > 1 ? it.qty-- : store.cart.splice(store.cart.indexOf(it), 1);
     saveCart(); render();
   }));
   $$('[data-rm]').forEach((b) => b.addEventListener('click', () => {
-    store.cart = store.cart.filter((x) => x.id !== +b.dataset.rm); saveCart(); render();
+    store.cart = store.cart.filter((x) => x.id !== +b.dataset.rm!); saveCart(); render();
   }));
 });
 
@@ -872,8 +942,8 @@ route('/cart', async (app) => {
 route('/checkout', async (app) => {
   if (!store.cart.length) return go('/cart', true);
 
-  let method = 'ub';
-  let promo = store.promo;
+  let method: DeliveryMethod = 'ub';
+  let promo: Promo | null = store.promo;
 
   const draw = () => {
     const sub = cartSubtotal();
@@ -911,7 +981,7 @@ route('/checkout', async (app) => {
       <div style="margin-top:14px">
         <div class="sum-row"><span>Барааны дүн</span><b>${mnt(sub)}</b></div>
         <div class="sum-row"><span>Хүргэлт (${DELIVERY_LABEL[method]})</span><b>${fee === 0 ? '<span style="color:var(--ok)">Үнэгүй</span>' : mnt(fee)}</b></div>
-        ${disc ? `<div class="sum-row" style="color:var(--ok)"><span>Хөнгөлөлт (${esc(promo.code)})</span><b>−${mnt(disc)}</b></div>` : ''}
+        ${disc ? `<div class="sum-row" style="color:var(--ok)"><span>Хөнгөлөлт (${esc(promo!.code)})</span><b>−${mnt(disc)}</b></div>` : ''}
         <div class="sum-row total"><span>Төлөх дүн</span><span class="price">${mnt(Math.max(0, sub + fee - disc))}</span></div>
       </div>`;
   };
@@ -1013,33 +1083,33 @@ route('/checkout', async (app) => {
   document.body.classList.add('has-checkout-bar');
 
   $('#coToggle').addEventListener('click', (e) => {
-    const open = $('#coMobileItems').hidden;
+    const open = $('#coMobileItems').hidden as boolean;
     $('#coMobileItems').hidden = !open;
-    e.currentTarget.classList.toggle('open', open);
-    e.currentTarget.setAttribute('aria-expanded', String(open));
+    (e.currentTarget as HTMLElement).classList.toggle('open', open);
+    (e.currentTarget as HTMLElement).setAttribute('aria-expanded', String(open));
   });
 
-  $('#placeBtnM').addEventListener('click', () => $('#coForm').requestSubmit());
+  $('#placeBtnM').addEventListener('click', () => $<HTMLFormElement>('#coForm').requestSubmit());
 
   draw();
 
-  const syncCards = (name) => $$(`input[name="${name}"]`).forEach((r) =>
-    r.closest('.opt-card').classList.toggle('on', r.checked));
+  const syncCards = (name: string) => $$<HTMLInputElement>(`input[name="${name}"]`).forEach((r) =>
+    r.closest('.opt-card')!.classList.toggle('on', r.checked));
 
-  $$('input[name="delivery_method"]').forEach((r) => r.addEventListener('change', () => {
-    method = r.value;
+  $$<HTMLInputElement>('input[name="delivery_method"]').forEach((r) => r.addEventListener('change', () => {
+    method = r.value as DeliveryMethod;
     syncCards('delivery_method');
     $('#addrFields').style.display = method === 'pickup' ? 'none' : '';
     draw();
   }));
-  $$('input[name="payment_method"]').forEach((r) =>
+  $$<HTMLInputElement>('input[name="payment_method"]').forEach((r) =>
     r.addEventListener('change', () => syncCards('payment_method')));
 
   $('#promoBtn').addEventListener('click', async () => {
-    const code = $('#promoInput').value.trim();
+    const code = $<HTMLInputElement>('#promoInput').value.trim();
     if (!code) { promo = null; store.promo = null; localStorage.removeItem('ks_promo'); $('#promoMsg').textContent = ''; draw(); return; }
     try {
-      const r = await api('/api/promo/check', { method: 'POST', body: { code, subtotal: cartSubtotal() } });
+      const r = await api<PromoCheckResponse>('/api/promo/check', { method: 'POST', body: { code, subtotal: cartSubtotal() } });
       promo = { code: r.code, discount: r.discount, note: r.note };
       store.promo = promo;
       localStorage.setItem('ks_promo', JSON.stringify(promo));
@@ -1047,14 +1117,14 @@ route('/checkout', async (app) => {
       draw();
     } catch (err) {
       promo = null;
-      $('#promoMsg').innerHTML = `<span style="color:var(--danger)">${esc(err.message)}</span>`;
+      $('#promoMsg').innerHTML = `<span style="color:var(--danger)">${esc((err as Error).message)}</span>`;
       draw();
     }
   });
 
   $('#coForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
+    const f = new FormData(e.target as HTMLFormElement);
     const phone = String(f.get('phone') || '').replace(/\D/g, '');
     if (phone.length !== 8) return toast('Утасны дугаар 8 оронтой байх ёстой', 'err');
 
@@ -1062,10 +1132,10 @@ route('/checkout', async (app) => {
     const address = [khoroo, String(f.get('address') || '').trim()].filter(Boolean).join(', ');
     if (method !== 'pickup' && address.length < 4) return toast('Хүргэлтийн хаягаа бүрэн оруулна уу', 'err');
 
-    const btns = [$('#placeBtn'), $('#placeBtnM')].filter(Boolean);
+    const btns = [$<HTMLButtonElement>('#placeBtn'), $<HTMLButtonElement>('#placeBtnM')].filter(Boolean);
     btns.forEach((b) => { b.disabled = true; b.textContent = 'Илгээж байна…'; });
     try {
-      const res = await api('/api/orders', {
+      const res = await api<OrderCreateResponse>('/api/orders', {
         method: 'POST',
         body: {
           name: f.get('name'), phone,
@@ -1083,7 +1153,7 @@ route('/checkout', async (app) => {
       store.promo = null; localStorage.removeItem('ks_promo');
       go('/order/' + res.code + '?new=1');
     } catch (err) {
-      toast(err.message, 'err');
+      toast((err as Error).message, 'err');
       btns.forEach((b, i) => { b.disabled = false; b.textContent = i ? 'Захиалах' : 'Захиалга баталгаажуулах'; });
     }
   });
@@ -1092,7 +1162,7 @@ route('/checkout', async (app) => {
 // ---------------------------------------------------------------------------
 // Захиалгын дэлгэрэнгүй / хяналт
 // ---------------------------------------------------------------------------
-function orderStepper(status) {
+function orderStepper(status: OrderStatus) {
   if (status === 'cancelled') {
     return `<div class="panel" style="background:var(--danger-100);border-color:#f2ccc8;text-align:center">
       <b style="color:var(--danger)">Энэ захиалга цуцлагдсан байна.</b>
@@ -1108,7 +1178,7 @@ function orderStepper(status) {
     </div>`).join('')}</div>`;
 }
 
-function orderDetail(o, isNew) {
+function orderDetail(o: Order, isNew: boolean) {
   const st = STATUS_MAP[o.status] || STATUS_MAP.new;
   return `
   <div class="wrap" style="padding-bottom:60px;max-width:860px">
@@ -1175,7 +1245,7 @@ function orderDetail(o, isNew) {
 // ---------------------------------------------------------------------------
 // QPay төлбөр
 // ---------------------------------------------------------------------------
-function qpayPanel(o) {
+function qpayPanel(o: Order) {
   if (o.payment_status === 'paid' || o.status === 'cancelled') {
     return o.payment_status === 'paid' ? `
       <div class="panel" style="background:var(--ok-100);border-color:#cfe9dc">
@@ -1199,18 +1269,18 @@ function qpayPanel(o) {
     </div>`;
 }
 
-async function mountQpay(order) {
+async function mountQpay(order: Order) {
   const body = $('#qpayBody');
   if (!body) return;
   const phone = phoneForOrder(order.code);
   const qs = phone ? `?phone=${encodeURIComponent(phone)}` : '';
 
-  let payment;
+  let payment: QpayPayment;
   try {
-    const r = await api(`/api/payments/qpay/${encodeURIComponent(order.code)}`, { method: 'POST', body: { phone } });
+    const r = await api<QpayCreateResponse>(`/api/payments/qpay/${encodeURIComponent(order.code)}`, { method: 'POST', body: { phone } });
     payment = r.payment;
   } catch (err) {
-    body.innerHTML = `<p style="color:var(--danger)">${esc(err.message)}</p>
+    body.innerHTML = `<p style="color:var(--danger)">${esc((err as Error).message)}</p>
       <button class="btn btn-outline" id="qpayRetry">Дахин оролдох</button>`;
     $('#qpayRetry').addEventListener('click', () => { qpayPanel(order); mountQpay(order); });
     return;
@@ -1245,11 +1315,11 @@ async function mountQpay(order) {
   };
   const check = async (loud = false) => {
     try {
-      const r = await api(`/api/payments/qpay/${encodeURIComponent(order.code)}${qs}`);
+      const r = await api<QpayStatusResponse>(`/api/payments/qpay/${encodeURIComponent(order.code)}${qs}`);
       if (r.order_status === 'paid' || r.payment?.status === 'paid') return onPaid();
       if (loud) toast('Төлбөр хараахан ороогүй байна', '');
     } catch (err) {
-      if (loud) toast(err.message, 'err');
+      if (loud) toast((err as Error).message, 'err');
     }
   };
 
@@ -1258,7 +1328,7 @@ async function mountQpay(order) {
     try {
       await api(`/api/payments/qpay/${encodeURIComponent(order.code)}/simulate`, { method: 'POST', body: { phone } });
       onPaid();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err) { toast((err as Error).message, 'err'); }
   });
 
   // 5 секунд тутам шалгана; хуудаснаас гарахад зогсоно
@@ -1272,7 +1342,7 @@ route('/order/:code', async (app, params, q) => {
   app.innerHTML = `<div class="wrap" style="padding-block:60px"><div class="sk" style="height:280px"></div></div>`;
   try {
     const phone = phoneForOrder(params.code);
-    const { order } = await api(`/api/orders/track?code=${encodeURIComponent(params.code)}`
+    const { order } = await api<OrderTrackResponse>(`/api/orders/track?code=${encodeURIComponent(params.code)}`
       + (phone ? `&phone=${encodeURIComponent(phone)}` : ''));
     app.innerHTML = crumbs([{ label: 'Нүүр', href: '/' }, { label: 'Захиалга ' + order.code }]) + orderDetail(order, q.new === '1');
     if (order.payment_method === 'qpay' && order.payment_status !== 'paid' && order.status !== 'cancelled') mountQpay(order);
@@ -1322,15 +1392,15 @@ route('/track', async (app, _p, q) => {
 
   $('#trackForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
+    const f = new FormData(e.target as HTMLFormElement);
     try {
-      const { order } = await api(`/api/orders/track?code=${encodeURIComponent(f.get('code'))}&phone=${encodeURIComponent(f.get('phone'))}`);
+      const { order } = await api<OrderTrackResponse>(`/api/orders/track?code=${encodeURIComponent(f.get('code') as string)}&phone=${encodeURIComponent(f.get('phone') as string)}`);
       // Утасны дугаарыг санаж үлдвэл QPay нэхэмжлэх үүсгэхэд ашиглана
       rememberOrder(order.code, String(f.get('phone') || '').replace(/\D/g, ''));
       $('#trackResult').innerHTML = orderDetail(order, false);
       if (order.payment_method === 'qpay' && order.payment_status !== 'paid' && order.status !== 'cancelled') mountQpay(order);
       $('#trackResult').scrollIntoView({ behavior: 'smooth' });
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err) { toast((err as Error).message, 'err'); }
   });
 });
 
@@ -1349,8 +1419,8 @@ route('/wishlist', async (app) => {
     return;
   }
   const list = await Promise.all(store.favs.map((id) =>
-    api('/api/products/' + id).then((r) => r.product).catch(() => null)));
-  const items = list.filter(Boolean);
+    api<ProductDetailResponse>('/api/products/' + id).then((r) => r.product).catch(() => null)));
+  const items = list.filter(Boolean) as Product[];
   $('#favGrid').innerHTML = items.length
     ? `<div class="prod-grid">${items.map(productCard).join('')}</div>`
     : `<div class="empty"><h3>Хоосон байна</h3></div>`;
@@ -1372,7 +1442,7 @@ route('/account', async (app) => {
   app.innerHTML = `${crumbs([{ label: 'Нүүр', href: '/' }, { label: 'Миний хэсэг' }])}
     <div class="wrap" style="padding-bottom:60px"><div id="acc">${skeletonGrid(2)}</div></div>`;
 
-  const { user, orders } = await api('/api/me');
+  const { user, orders } = await api<MeResponse>('/api/me');
   store.user = user;
 
   $('#acc').innerHTML = `
@@ -1417,7 +1487,7 @@ route('/account', async (app) => {
                 <td class="muted">${dateMn(o.created_at)}</td>
                 <td class="muted">${o.items.length} нэр төрөл</td>
                 <td><b>${mnt(o.total)}</b></td>
-                <td><span class="chip ${(STATUS_MAP[o.status] || {}).chip}">${(STATUS_MAP[o.status] || {}).label}</span></td>
+                <td><span class="chip ${(STATUS_MAP[o.status] || ({} as StatusInfo)).chip}">${(STATUS_MAP[o.status] || ({} as StatusInfo)).label}</span></td>
                 <td><a class="btn btn-ghost btn-sm" href="/order/${o.code}" data-link>Үзэх</a></td>
               </tr>`).join('')}</tbody>
           </table>
@@ -1433,11 +1503,11 @@ route('/account', async (app) => {
 
   $('#profForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
+    const f = Object.fromEntries(new FormData(e.target as HTMLFormElement));
     try {
-      const r = await api('/api/me', { method: 'PATCH', body: f });
+      const r = await api<AuthResponse>('/api/me', { method: 'PATCH', body: f });
       store.user = r.user; renderUserBtn(); toast('Мэдээлэл хадгалагдлаа', 'ok');
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err) { toast((err as Error).message, 'err'); }
   });
 });
 
@@ -1505,7 +1575,7 @@ function renderCart() {
     const badge = $(id);
     if (!badge) continue;
     badge.hidden = n === 0;
-    badge.textContent = n;
+    badge.textContent = n as any;
   }
   $('#cartQty').textContent = n ? `(${n} бараа)` : '';
 
@@ -1546,14 +1616,14 @@ function renderCart() {
     <a class="btn btn-ghost btn-block" href="/cart" data-link id="drawerCart" style="margin-top:6px">Сагс харах</a>`;
 
   $$('[data-cinc]').forEach((b) => b.addEventListener('click', () => {
-    const it = store.cart.find((x) => x.id === +b.dataset.cinc); it.qty = Math.min(99, it.qty + 1); saveCart();
+    const it = store.cart.find((x) => x.id === +b.dataset.cinc!)!; it.qty = Math.min(99, it.qty + 1); saveCart();
   }));
   $$('[data-cdec]').forEach((b) => b.addEventListener('click', () => {
-    const it = store.cart.find((x) => x.id === +b.dataset.cdec);
+    const it = store.cart.find((x) => x.id === +b.dataset.cdec!)!;
     it.qty > 1 ? it.qty-- : store.cart.splice(store.cart.indexOf(it), 1); saveCart();
   }));
   $$('[data-crm]').forEach((b) => b.addEventListener('click', () => {
-    store.cart = store.cart.filter((x) => x.id !== +b.dataset.crm); saveCart();
+    store.cart = store.cart.filter((x) => x.id !== +b.dataset.crm!); saveCart();
   }));
   ['#drawerCheckout', '#drawerCart'].forEach((s) => $(s)?.addEventListener('click', closeCart));
 }
@@ -1566,14 +1636,14 @@ function renderFavCount() {
     const b = $(id);
     if (!b) continue;
     b.hidden = store.favs.length === 0;
-    b.textContent = store.favs.length;
+    b.textContent = store.favs.length as any;
   }
 }
 
 // ---------------------------------------------------------------------------
 // Modal / нэвтрэх
 // ---------------------------------------------------------------------------
-const openModal = (html) => { $('#modalContent').innerHTML = html; $('#modal').classList.add('on'); document.body.style.overflow = 'hidden'; };
+const openModal = (html: string) => { $('#modalContent').innerHTML = html; $('#modal').classList.add('on'); document.body.style.overflow = 'hidden'; };
 const closeModal = () => { $('#modal').classList.remove('on'); document.body.style.overflow = ''; };
 
 function openAuth(mode = 'login') {
@@ -1611,17 +1681,17 @@ function openAuth(mode = 'login') {
 
   $('#authForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    const btn = $('#authSubmit');
+    const f = Object.fromEntries(new FormData(e.target as HTMLFormElement));
+    const btn = $<HTMLButtonElement>('#authSubmit');
     btn.disabled = true;
     try {
-      const r = await api(current === 'login' ? '/api/auth/login' : '/api/auth/register', { method: 'POST', body: f });
+      const r = await api<AuthResponse>(current === 'login' ? '/api/auth/login' : '/api/auth/register', { method: 'POST', body: f });
       store.user = r.user;
       renderUserBtn();
       closeModal();
       toast(`Сайн байна уу, ${r.user.name}!`, 'ok');
       if (location.pathname === '/account') render();
-    } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
+    } catch (err) { toast((err as Error).message, 'err'); btn.disabled = false; }
   });
 }
 
@@ -1668,34 +1738,34 @@ function openForgot(step = 1, phone = '', mockCode = '') {
 
   $('#forgotForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const p = String(new FormData(e.target).get('phone') || '').replace(/\D/g, '');
+    const p = String(new FormData(e.target as HTMLFormElement).get('phone') || '').replace(/\D/g, '');
     if (p.length !== 8) return toast('Утасны дугаар 8 оронтой байх ёстой', 'err');
-    const btn = $('#forgotSubmit');
+    const btn = $<HTMLButtonElement>('#forgotSubmit');
     btn.disabled = true; btn.textContent = 'Илгээж байна…';
     try {
-      const r = await api('/api/auth/forgot', { method: 'POST', body: { phone: p } });
+      const r = await api<ForgotResponse>('/api/auth/forgot', { method: 'POST', body: { phone: p } });
       toast(r.message, 'ok');
       openForgot(2, p, r.code || '');
     } catch (err) {
-      toast(err.message, 'err');
+      toast((err as Error).message, 'err');
       btn.disabled = false; btn.textContent = 'Код авах';
     }
   });
 
   $('#resetForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
+    const f = Object.fromEntries(new FormData(e.target as HTMLFormElement));
     if (f.password !== f.password2) return toast('Нууц үг хоорондоо таарахгүй байна', 'err');
-    const btn = $('#resetSubmit');
+    const btn = $<HTMLButtonElement>('#resetSubmit');
     btn.disabled = true;
     try {
-      const r = await api('/api/auth/reset', { method: 'POST', body: { phone, code: f.code, password: f.password } });
+      const r = await api<AuthResponse>('/api/auth/reset', { method: 'POST', body: { phone, code: f.code, password: f.password } });
       store.user = r.user;
       renderUserBtn();
       closeModal();
       toast('Нууц үг шинэчлэгдлээ. Тавтай морил!', 'ok');
       if (location.pathname === '/account') render();
-    } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
+    } catch (err) { toast((err as Error).message, 'err'); btn.disabled = false; }
   });
 }
 
@@ -1711,18 +1781,18 @@ function renderUserBtn() {
 // Delegated events
 // ---------------------------------------------------------------------------
 document.addEventListener('click', async (e) => {
-  const fav = e.target.closest('[data-fav]');
-  if (fav) { e.preventDefault(); toggleFav(+fav.dataset.fav); return; }
+  const fav = (e.target as Element).closest<HTMLElement>('[data-fav]');
+  if (fav) { e.preventDefault(); toggleFav(+fav.dataset.fav!); return; }
 
-  const add = e.target.closest('[data-add]');
+  const add = (e.target as Element).closest<HTMLButtonElement>('[data-add]');
   if (add) {
     e.preventDefault();
     add.disabled = true;
     try {
-      const { product } = await api('/api/products/' + add.dataset.add);
+      const { product } = await api<ProductDetailResponse>('/api/products/' + add.dataset.add);
       addToCart(product, 1);
       if (!isMobile()) openCart();   // утсанд бүтэн дэлгэцийн самбар нээх нь бүдүүлэг тул зөвхөн мэдэгдэнэ
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err) { toast((err as Error).message, 'err'); }
     add.disabled = false;
   }
 });
@@ -1731,10 +1801,10 @@ document.addEventListener('click', async (e) => {
 // Эхлүүлэх
 // ---------------------------------------------------------------------------
 async function boot() {
-  $('#year').textContent = new Date().getFullYear();
+  $('#year').textContent = new Date().getFullYear() as any;
 
   try {
-    const data = await api('/api/bootstrap');
+    const data = await api<BootstrapResponse>('/api/bootstrap');
     Object.assign(store, {
       settings: data.settings, categories: data.categories,
       brands: data.brands, price: data.price, user: data.user,
@@ -1745,7 +1815,7 @@ async function boot() {
 
   const s = store.settings;
   $('#topPhone').textContent = '☎ ' + (s.phone || '');
-  $('#topPhone').href = 'tel:' + (s.phone || '');
+  $<HTMLAnchorElement>('#topPhone').href = 'tel:' + (s.phone || '');
   $('#footerContact').innerHTML = `
     <span class="row" style="gap:9px;align-items:flex-start">${icon('pin', 17)}<span>${esc(s.address || '')}</span></span>
     <a class="row" style="gap:9px" href="tel:${esc(s.phone)}">${icon('phone', 17)}<span>${esc(s.phone)} · ${esc(s.phone2 || '')}</span></a>
@@ -1777,11 +1847,11 @@ async function boot() {
 
   // --- Холбоо барих хөвөгч товч (утас) ---
   const fbPage = (s.facebook || '').replace(/^https?:\/\//, '').replace(/^facebook\.com\//, '').replace(/\/$/, '');
-  $('#fabCall').href = 'tel:' + (s.phone || '').replace(/[^0-9+]/g, '');
-  $('#fabMsg').href = fbPage ? `https://m.me/${fbPage}` : `https://facebook.com`;
+  $<HTMLAnchorElement>('#fabCall').href = 'tel:' + (s.phone || '').replace(/[^0-9+]/g, '');
+  $<HTMLAnchorElement>('#fabMsg').href = fbPage ? `https://m.me/${fbPage}` : `https://facebook.com`;
   $('#fabBtn').addEventListener('click', () => {
     const list = $('#fabActions');
-    const open = list.hidden;
+    const open = list.hidden as boolean;
     list.hidden = !open;
     $('#fabBtn').classList.toggle('on', open);
     $('#fabBtn').setAttribute('aria-expanded', String(open));
@@ -1800,13 +1870,13 @@ async function boot() {
 
   $('#searchForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    const q = $('#searchInput').value.trim();
+    const q = $<HTMLInputElement>('#searchInput').value.trim();
     go(q ? '/catalog?q=' + encodeURIComponent(q) : '/catalog');
   });
 
   $('#newsForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    e.target.reset();
+    (e.target as HTMLFormElement).reset();
     toast('Бүртгэгдлээ! Хямдралын мэдээг хүргэх болно.', 'ok');
   });
 

@@ -3,40 +3,118 @@
    ========================================================================= */
 'use strict';
 
-const $ = (s, r = document) => r.querySelector(s);
-const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+// ---------------------------------------------------------------------------
+// Төрлүүд (зөвхөн compile-time — үүсэх JS-д ямар ч нөлөөгүй)
+// ---------------------------------------------------------------------------
+type OrderStatus = 'new' | 'confirmed' | 'packed' | 'shipping' | 'delivered' | 'cancelled';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+interface AdminUser { name: string; phone: string; role: string; }
 
-const mnt = (n) => Number(n || 0).toLocaleString('mn-MN') + '₮';
-const kmnt = (n) => (Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + 'сая₮'
+interface Category { id: number; name: string; slug: string; kind: string; count: number; }
+
+interface ProductImage { id: number; url: string; }
+
+interface Product {
+  id: number; name: string; sku: string; brand: string;
+  category_id: number; category_name: string;
+  price: number; compare_price: number | null;
+  stock: number; sold: number; active: number;
+  image: string; hue: number; shape: string;
+  badge?: string; volume?: string; short?: string;
+  description?: string; howto?: string; ingredients?: string;
+  rating?: number; images?: ProductImage[];
+}
+
+interface OrderItem { product_id: number; name: string; sku: string; price: number; qty: number; }
+
+interface Order {
+  id: number; code: string; status: OrderStatus;
+  customer_name: string; phone: string; created_at: string;
+  subtotal: number; delivery_fee: number; discount: number; total: number;
+  promo_code: string; note: string; district: string; address: string;
+  payment_method: string; payment_status: string; delivery_method: string;
+  items: OrderItem[];
+}
+
+interface Promo { code: string; type: string; value: number; min_total: number; note: string; active: number; }
+
+interface Customer {
+  name: string; phone: string; email: string; district: string;
+  orders: number; spent: number; created_at: string;
+}
+
+interface Payment {
+  created_at: string; order_id: number; order_code: string;
+  customer_name: string; phone: string; invoice_id: string;
+  amount: number; paid_amount: number; status: string; mode: string;
+}
+
+interface SmsMessage { created_at: string; phone: string; kind: string; body: string; status: string; error?: string; }
+
+interface SeriesPoint { label: string; revenue: number; orders: number; }
+
+interface Stats {
+  byStatus: Record<OrderStatus, number>;
+  totals: { revenue: number; orders: number; customers: number; products: number };
+  month: { revenue: number };
+  today: { orders: number };
+  series: SeriesPoint[];
+  topProducts: { id: number; name: string; qty: number; revenue: number }[];
+  lowStock: { id: number; name: string; sku: string; category_name: string; stock: number }[];
+  recent: Pick<Order, 'code' | 'status' | 'customer_name' | 'created_at' | 'total'>[];
+  byCategory: { name: string; revenue: number }[];
+}
+
+interface ListResp<T> { items: T[]; }
+interface OrdersResp extends ListResp<Order> { total: number; page: number; pages: number; }
+interface PaymentsResp extends ListResp<Payment> { live: boolean; }
+interface SmsResp extends ListResp<SmsMessage> {
+  stats: { sent?: number; failed?: number };
+  live: boolean; provider: string;
+}
+
+interface IntegrationsInfo {
+  qpay: { live: boolean; base_url?: string; callback_base?: string; missing: string[] };
+  sms: { live: boolean; notify_on_order: boolean; notify_on_status: boolean; provider?: string };
+  uploads: { max_bytes: number };
+}
+
+interface ApiOptions extends Omit<RequestInit, 'body'> { body?: unknown; }
+
+const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document): T => r.querySelector(s) as T;
+const $$ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document): T[] => [...r.querySelectorAll(s)] as T[];
+
+const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
+
+const mnt = (n: number) => Number(n || 0).toLocaleString('mn-MN') + '₮';
+const kmnt = (n: number) => (Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + 'сая₮'
   : Math.abs(n) >= 1e3 ? Math.round(n / 1e3) + 'мянга' : n + '₮');
 
-const dateMn = (iso) => {
+const dateMn = (iso: string) => {
   const d = new Date(iso);
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 };
-const timeMn = (iso) => {
+const timeMn = (iso: string) => {
   const d = new Date(iso);
   return `${dateMn(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
-const icon = (n, s = 20) => `<svg width="${s}" height="${s}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const icon = (n: string, s = 20) => `<svg width="${s}" height="${s}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
-async function api(path, opts = {}) {
+async function api<T = { ok?: boolean }>(path: string, opts: ApiOptions = {}): Promise<T> {
   const res = await fetch(path, {
     headers: opts.body ? { 'Content-Type': 'application/json' } : {},
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  let data = {};
+  let data: { ok?: boolean; error?: string } = {};
   try { data = await res.json(); } catch { /* хоосон */ }
   if (!res.ok || data.ok === false) throw new Error(data.error || 'Алдаа гарлаа');
-  return data;
+  return data as T;
 }
 
-function toast(msg, type = '') {
+function toast(msg: string, type = '') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.innerHTML = `${type === 'ok' ? icon('check', 18) : type === 'err' ? icon('x', 18) : icon('spark', 18)}<span>${esc(msg)}</span>`;
@@ -44,7 +122,7 @@ function toast(msg, type = '') {
   setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
 }
 
-const STATUS = {
+const STATUS: Record<OrderStatus, { label: string; chip: string }> = {
   new:       { label: 'Шинэ',          chip: 'chip-info' },
   confirmed: { label: 'Баталгаажсан',  chip: 'chip-plum' },
   packed:    { label: 'Савлагдсан',    chip: 'chip-gold' },
@@ -52,19 +130,25 @@ const STATUS = {
   delivered: { label: 'Хүргэгдсэн',    chip: 'chip-ok' },
   cancelled: { label: 'Цуцлагдсан',    chip: 'chip-danger' },
 };
-const DELIVERY = { ub: 'Хотын хүргэлт', pickup: 'Өөрөө авах', country: 'Орон нутаг' };
-const PAYMENT = { cash: 'Бэлнээр', transfer: 'Дансаар', qpay: 'QPay/карт' };
+const DELIVERY: Record<string, string> = { ub: 'Хотын хүргэлт', pickup: 'Өөрөө авах', country: 'Орон нутаг' };
+const PAYMENT: Record<string, string> = { cash: 'Бэлнээр', transfer: 'Дансаар', qpay: 'QPay/карт' };
 const SHAPES = [['bottle', 'Лонх'], ['jar', 'Сав (маск)'], ['tube', 'Тюбик'], ['spray', 'Шүршигч'],
   ['drop', 'Дуслуур'], ['polish', 'Лакны сав'], ['tool', 'Багаж'], ['set', 'Багц']];
 
-const state = { user: null, cats: [], page: 'dash', cache: {} };
+const state: {
+  user: AdminUser | null;
+  cats: Category[];
+  page: string;
+  cache: { orders?: Order[]; products?: Product[] };
+  sep?: boolean;
+} = { user: null, cats: [], page: 'dash', cache: {} };
 
 const isMobile = () => window.matchMedia('(max-width: 820px)').matches;
 
 // ---------------------------------------------------------------------------
 // Sheet
 // ---------------------------------------------------------------------------
-function openSheet(title, body, foot = '') {
+function openSheet(title: string, body: string, foot = '') {
   $('#sheetTitle').textContent = title;
   $('#sheetBody').innerHTML = body;
   $('#sheetFoot').innerHTML = foot;
@@ -106,15 +190,15 @@ function loginView() {
 
   $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    const btn = $('#loginBtn');
+    const f = Object.fromEntries(new FormData(e.target as HTMLFormElement));
+    const btn = $<HTMLButtonElement>('#loginBtn');
     btn.disabled = true; btn.textContent = 'Шалгаж байна…';
     try {
-      const r = await api('/api/auth/login', { method: 'POST', body: f });
+      const r = await api<{ user: AdminUser }>('/api/auth/login', { method: 'POST', body: f });
       if (r.user.role !== 'admin') throw new Error('Танд админ эрх байхгүй байна');
       state.user = r.user;
       await boot();
-    } catch (err) {
+    } catch (err: any) {
       toast(err.message, 'err');
       btn.disabled = false; btn.textContent = 'Нэвтрэх';
     }
@@ -159,10 +243,10 @@ function shell() {
       <nav class="side-nav">${nav}</nav>
       <div class="side-foot">
         <div class="row" style="gap:10px;margin-bottom:10px">
-          <span class="avatar" style="width:34px;height:34px;font-size:.9rem">${esc(state.user.name.trim()[0] || 'A')}</span>
+          <span class="avatar" style="width:34px;height:34px;font-size:.9rem">${esc(state.user!.name.trim()[0] || 'A')}</span>
           <div style="line-height:1.25;min-width:0">
-            <b style="color:#fff;font-size:.86rem">${esc(state.user.name)}</b><br>
-            <span style="color:#9d8c93;font-size:.76rem">${esc(state.user.phone)}</span>
+            <b style="color:#fff;font-size:.86rem">${esc(state.user!.name)}</b><br>
+            <span style="color:#9d8c93;font-size:.76rem">${esc(state.user!.phone)}</span>
           </div>
         </div>
         <div class="row" style="gap:6px">
@@ -186,7 +270,7 @@ function shell() {
   </div>`;
 
   $$('[data-nav]').forEach((b) => b.addEventListener('click', () => {
-    location.hash = b.dataset.nav;
+    location.hash = b.dataset.nav!;
     $('#side').classList.remove('on');
     $('#overlay').classList.remove('on');
   }));
@@ -211,11 +295,11 @@ function shell() {
       $('#overlay').classList.toggle('on');
       return;
     }
-    location.hash = b.dataset.anav;
+    location.hash = b.dataset.anav!;
   }));
 }
 
-function setHead(title, sub = '', actions = '') {
+function setHead(title: string, sub = '', actions = '') {
   $('#pageTitle').textContent = title;
   $('#pageSub').textContent = sub;
   $('#pageActions').innerHTML = actions;
@@ -226,7 +310,7 @@ function setHead(title, sub = '', actions = '') {
 // ---------------------------------------------------------------------------
 // График
 // ---------------------------------------------------------------------------
-function barChart(series, key = 'revenue') {
+function barChart(series: SeriesPoint[], key: 'revenue' | 'orders' = 'revenue') {
   // Утсанд viewBox-ыг нарийсгаж, бичиг жижгэрч уншигдахгүй болохоос сэргийлнэ
   const compact = isMobile();
   const W = compact ? 360 : 720;
@@ -260,7 +344,7 @@ function barChart(series, key = 'revenue') {
   </svg>`;
 }
 
-function hbars(rows) {
+function hbars(rows: { label: string; value: number; display: string }[]) {
   const max = Math.max(1, ...rows.map((r) => r.value));
   return rows.map((r) => `
     <div class="hbar-row">
@@ -276,13 +360,13 @@ async function pageDash() {
   setHead('Хяналтын самбар', 'Дэлгүүрийн өнөөдрийн байдал');
   $('#content').innerHTML = `<div class="sk" style="height:420px"></div>`;
 
-  const s = await api('/api/admin/stats');
+  const s = await api<Stats>('/api/admin/stats');
   const pendingCount = s.byStatus.new + s.byStatus.confirmed + s.byStatus.packed + s.byStatus.shipping;
   for (const sel of ['[data-pill="orders"]', '#navNew']) {
     const el = $(sel);
     if (!el) continue;
     el.hidden = !s.byStatus.new;
-    el.textContent = s.byStatus.new;
+    el.textContent = s.byStatus.new as unknown as string;
   }
 
   const avg = s.totals.orders ? Math.round(s.totals.revenue / s.totals.orders) : 0;
@@ -330,7 +414,7 @@ async function pageDash() {
       <div class="box-head"><h3>Захиалгын төлөв</h3></div>
       <div class="box-body">
         ${hbars(Object.entries(s.byStatus).map(([k, v]) => ({
-          label: STATUS[k].label, value: v, display: v + ' ш',
+          label: STATUS[k as OrderStatus].label, value: v, display: v + ' ш',
         })))}
         <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:14px">
           <button class="btn btn-outline btn-sm" data-goto="orders">Захиалга удирдах</button>
@@ -403,7 +487,7 @@ async function pageDash() {
     </div>
   </div>`;
 
-  $$('[data-goto]').forEach((b) => b.addEventListener('click', () => { location.hash = b.dataset.goto; }));
+  $$('[data-goto]').forEach((b) => b.addEventListener('click', () => { location.hash = b.dataset.goto!; }));
 }
 
 // ---------------------------------------------------------------------------
@@ -428,23 +512,23 @@ async function pageOrders() {
     <div class="box" id="ordersBox"><div class="box-body"><div class="sk" style="height:300px"></div></div></div>`;
 
   $$('#statusSeg button').forEach((b) => b.addEventListener('click', () => {
-    ordersFilter.status = b.dataset.st; ordersFilter.page = 1; pageOrders();
+    ordersFilter.status = b.dataset.st!; ordersFilter.page = 1; pageOrders();
   }));
-  let t;
+  let t: number | undefined;
   $('#oSearch').addEventListener('input', (e) => {
     clearTimeout(t);
-    t = setTimeout(() => { ordersFilter.q = e.target.value.trim(); ordersFilter.page = 1; loadOrders(); }, 320);
+    t = setTimeout(() => { ordersFilter.q = (e.target as HTMLInputElement).value.trim(); ordersFilter.page = 1; loadOrders(); }, 320);
   });
 
   loadOrders();
 }
 
 async function loadOrders() {
-  const p = new URLSearchParams({ per: '20', page: ordersFilter.page });
+  const p = new URLSearchParams({ per: '20', page: ordersFilter.page } as unknown as Record<string, string>);
   if (ordersFilter.status) p.set('status', ordersFilter.status);
   if (ordersFilter.q) p.set('q', ordersFilter.q);
 
-  const d = await api('/api/admin/orders?' + p);
+  const d = await api<OrdersResp>('/api/admin/orders?' + p);
   state.cache.orders = d.items;
 
   $('#ordersBox').innerHTML = `
@@ -504,27 +588,27 @@ async function loadOrders() {
     : `<div class="box-body"><div class="empty"><div class="empty-ico">${icon('cart', 28)}</div>
         <h3>Захиалга олдсонгүй</h3><p>Шүүлтүүрээ өөрчилж үзнэ үү.</p></div></div>`}`;
 
-  $$('[data-status]').forEach((sel) => sel.addEventListener('change', async () => {
-    const id = sel.dataset.status;
-    const prev = state.cache.orders.find((o) => o.id === +id)?.status;
+  $$<HTMLSelectElement>('[data-status]').forEach((sel) => sel.addEventListener('change', async () => {
+    const id = sel.dataset.status!;
+    const prev = state.cache.orders!.find((o) => o.id === +id)?.status;
     try {
       await api('/api/admin/orders/' + id, { method: 'PATCH', body: { status: sel.value } });
-      toast(`${STATUS[sel.value].label} болголоо`, 'ok');
+      toast(`${STATUS[sel.value as OrderStatus].label} болголоо`, 'ok');
       loadOrders();
-    } catch (err) { toast(err.message, 'err'); sel.value = prev; }
+    } catch (err: any) { toast(err.message, 'err'); sel.value = prev!; }
   }));
 
   $$('[data-view]').forEach((b) => b.addEventListener('click', () => {
-    const o = state.cache.orders.find((x) => x.id === +b.dataset.view);
+    const o = state.cache.orders!.find((x) => x.id === +b.dataset.view!)!;
     showOrder(o);
   }));
 
   $$('#oPager button').forEach((b) => b.addEventListener('click', () => {
-    ordersFilter.page = +b.dataset.p; loadOrders();
+    ordersFilter.page = +b.dataset.p!; loadOrders();
   }));
 }
 
-function showOrder(o) {
+function showOrder(o: Order) {
   openSheet(`Захиалга ${o.code}`, `
     <div class="row-between" style="margin-bottom:18px">
       <span class="chip ${STATUS[o.status].chip}" style="padding:8px 16px">${STATUS[o.status].label}</span>
@@ -575,10 +659,10 @@ function showOrder(o) {
 
   $('#sheetSave').addEventListener('click', async () => {
     try {
-      await api('/api/admin/orders/' + o.id, { method: 'PATCH', body: { status: $('#sheetStatus').value } });
+      await api('/api/admin/orders/' + o.id, { method: 'PATCH', body: { status: $<HTMLSelectElement>('#sheetStatus').value } });
       toast('Төлөв шинэчлэгдлээ', 'ok');
       closeSheet(); loadOrders();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err: any) { toast(err.message, 'err'); }
   });
 }
 
@@ -607,12 +691,12 @@ async function pageProducts() {
     <div class="box" id="prodBox"><div class="box-body"><div class="sk" style="height:340px"></div></div></div>`;
 
   $('#newProd').addEventListener('click', () => productForm(null));
-  let t;
+  let t: number | undefined;
   $('#pSearch').addEventListener('input', (e) => {
-    clearTimeout(t); t = setTimeout(() => { prodFilter.q = e.target.value.trim(); loadProducts(); }, 300);
+    clearTimeout(t); t = setTimeout(() => { prodFilter.q = (e.target as HTMLInputElement).value.trim(); loadProducts(); }, 300);
   });
-  $('#pCat').addEventListener('change', (e) => { prodFilter.category = e.target.value; loadProducts(); });
-  $$('[data-stk]').forEach((b) => b.addEventListener('click', () => { prodFilter.stock = b.dataset.stk; pageProducts(); }));
+  $('#pCat').addEventListener('change', (e) => { prodFilter.category = (e.target as HTMLSelectElement).value; loadProducts(); });
+  $$('[data-stk]').forEach((b) => b.addEventListener('click', () => { prodFilter.stock = b.dataset.stk!; pageProducts(); }));
 
   loadProducts();
 }
@@ -623,7 +707,7 @@ async function loadProducts() {
   if (prodFilter.category) p.set('category', prodFilter.category);
   if (prodFilter.stock) p.set('stock', prodFilter.stock);
 
-  const d = await api('/api/admin/products?' + p);
+  const d = await api<ListResp<Product>>('/api/admin/products?' + p);
   state.cache.products = d.items;
 
   $('#prodBox').innerHTML = `
@@ -654,30 +738,30 @@ async function loadProducts() {
     </table></div>`
     : `<div class="box-body"><div class="empty"><h3>Бараа олдсонгүй</h3></div></div>`}`;
 
-  $$('[data-stock]').forEach((inp) => inp.addEventListener('change', async () => {
+  $$<HTMLInputElement>('[data-stock]').forEach((inp) => inp.addEventListener('change', async () => {
     try {
       await api('/api/admin/products/' + inp.dataset.stock, { method: 'PATCH', body: { stock: +inp.value } });
       toast('Үлдэгдэл шинэчлэгдлээ', 'ok');
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err: any) { toast(err.message, 'err'); }
   }));
 
   $$('[data-edit]').forEach((b) => b.addEventListener('click', () =>
-    productForm(state.cache.products.find((x) => x.id === +b.dataset.edit))));
+    productForm(state.cache.products!.find((x) => x.id === +b.dataset.edit!))));
 
   $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-    const p = state.cache.products.find((x) => x.id === +b.dataset.del);
+    const p = state.cache.products!.find((x) => x.id === +b.dataset.del!)!;
     if (!confirm(`"${p.name}" барааг устгах уу?\n\nЗахиалгад орсон бол устгахын оронд нуугдана.`)) return;
     try {
-      const r = await api('/api/admin/products/' + p.id, { method: 'DELETE' });
+      const r = await api<{ archived?: boolean }>('/api/admin/products/' + p.id, { method: 'DELETE' });
       toast(r.archived ? 'Бараа нуугдлаа (захиалгад ашиглагдсан)' : 'Бараа устлаа', 'ok');
       loadProducts();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err: any) { toast(err.message, 'err'); }
   }));
 }
 
-function productForm(p) {
+function productForm(p?: Product | null) {
   const isNew = !p;
-  const v = p || { hue: 320, shape: 'bottle', active: 1, price: 0, stock: 0, rating: 5 };
+  const v: Partial<Product> = p || { hue: 320, shape: 'bottle', active: 1, price: 0, stock: 0, rating: 5 };
 
   openSheet(isNew ? 'Шинэ бараа нэмэх' : 'Бараа засах', `
     <form id="prodForm">
@@ -753,30 +837,30 @@ function productForm(p) {
     `<button class="btn btn-outline" id="cancelBtn">Болих</button>
      <button class="btn" id="saveProd">${isNew ? 'Нэмэх' : 'Хадгалах'}</button>`);
 
-  const preview = $('#preview');
+  const preview = $<HTMLImageElement>('#preview');
   const updatePreview = () => {
-    const brand = $('#prodForm').elements.brand.value;
-    preview.src = `/img/preview.svg?hue=${$('#hue').value}&shape=${$('#shape').value}&brand=${encodeURIComponent(brand)}`;
+    const brand = ($<HTMLFormElement>('#prodForm').elements as unknown as { brand: HTMLInputElement }).brand.value;
+    preview.src = `/img/preview.svg?hue=${$<HTMLInputElement>('#hue').value}&shape=${$<HTMLSelectElement>('#shape').value}&brand=${encodeURIComponent(brand)}`;
   };
   $('#hue').addEventListener('input', updatePreview);
   $('#shape').addEventListener('change', updatePreview);
-  $('#prodForm').elements.brand.addEventListener('change', updatePreview);
+  ($<HTMLFormElement>('#prodForm').elements as unknown as { brand: HTMLInputElement }).brand.addEventListener('change', updatePreview);
 
   $('#activeCard').addEventListener('change', (e) =>
-    e.currentTarget.classList.toggle('on', e.target.checked));
+    (e.currentTarget as HTMLElement).classList.toggle('on', (e.target as HTMLInputElement).checked));
 
   $('#cancelBtn').addEventListener('click', closeSheet);
 
-  if (!isNew) mountPhotoManager(v.id, v.images || []);
+  if (!isNew) mountPhotoManager(v.id!, v.images || []);
 
   $('#saveProd').addEventListener('click', async () => {
-    const form = $('#prodForm');
+    const form = $<HTMLFormElement>('#prodForm');
     if (!form.reportValidity()) return;
-    const f = Object.fromEntries(new FormData(form));
+    const f = Object.fromEntries(new FormData(form)) as Record<string, string>;
     const body = {
       ...f,
-      hue: +$('#hue').value,
-      shape: $('#shape').value,
+      hue: +$<HTMLInputElement>('#hue').value,
+      shape: $<HTMLSelectElement>('#shape').value,
       price: +f.price,
       compare_price: f.compare_price ? +f.compare_price : null,
       stock: +f.stock,
@@ -789,7 +873,7 @@ function productForm(p) {
       toast(isNew ? 'Бараа нэмэгдлээ' : 'Хадгалагдлаа', 'ok');
       closeSheet();
       loadProducts();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err: any) { toast(err.message, 'err'); }
   });
 }
 
@@ -798,7 +882,7 @@ function productForm(p) {
 // ---------------------------------------------------------------------------
 async function pageCategories() {
   setHead('Ангилал', 'Каталогийн бүтэц');
-  const d = await api('/api/admin/categories');
+  const d = await api<ListResp<Category>>('/api/admin/categories');
   state.cats = d.items;
 
   $('#content').innerHTML = `
@@ -838,10 +922,10 @@ async function pageCategories() {
   $('#catForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api('/api/admin/categories', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      await api('/api/admin/categories', { method: 'POST', body: Object.fromEntries(new FormData(e.target as HTMLFormElement)) });
       toast('Ангилал нэмэгдлээ', 'ok');
       pageCategories();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err: any) { toast(err.message, 'err'); }
   });
 
   $$('[data-delcat]').forEach((b) => b.addEventListener('click', async () => {
@@ -849,7 +933,7 @@ async function pageCategories() {
     try {
       await api('/api/admin/categories/' + b.dataset.delcat, { method: 'DELETE' });
       toast('Устлаа', 'ok'); pageCategories();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err: any) { toast(err.message, 'err'); }
   }));
 }
 
@@ -858,7 +942,7 @@ async function pageCategories() {
 // ---------------------------------------------------------------------------
 async function pagePromos() {
   setHead('Урамшуулал', 'Хөнгөлөлтийн кодууд');
-  const d = await api('/api/admin/promos');
+  const d = await api<ListResp<Promo>>('/api/admin/promos');
 
   $('#content').innerHTML = `
   <div class="cols cols-2">
@@ -902,19 +986,19 @@ async function pagePromos() {
 
   $('#promoForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
+    const f = Object.fromEntries(new FormData(e.target as HTMLFormElement)) as Record<string, string>;
     try {
       await api('/api/admin/promos', {
         method: 'POST',
         body: { ...f, value: +f.value, min_total: +f.min_total, active: true },
       });
       toast('Код үүслээ', 'ok'); pagePromos();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err: any) { toast(err.message, 'err'); }
   });
 
   $$('[data-delpromo]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm(`"${b.dataset.delpromo}" кодыг устгах уу?`)) return;
-    await api('/api/admin/promos/' + encodeURIComponent(b.dataset.delpromo), { method: 'DELETE' });
+    await api('/api/admin/promos/' + encodeURIComponent(b.dataset.delpromo!), { method: 'DELETE' });
     toast('Устлаа', 'ok'); pagePromos();
   }));
 }
@@ -924,7 +1008,7 @@ async function pagePromos() {
 // ---------------------------------------------------------------------------
 async function pageCustomers() {
   setHead('Хэрэглэгч', 'Бүртгэлтэй үйлчлүүлэгчид');
-  const d = await api('/api/admin/customers');
+  const d = await api<ListResp<Customer>>('/api/admin/customers');
   const totalSpent = d.items.reduce((a, c) => a + c.spent, 0);
 
   $('#content').innerHTML = `
@@ -963,7 +1047,7 @@ async function pageCustomers() {
 // ---------------------------------------------------------------------------
 // Хуудас: Тохиргоо
 // ---------------------------------------------------------------------------
-const SETTING_LABELS = {
+const SETTING_LABELS: Record<string, string> = {
   store_name: 'Дэлгүүрийн нэр', tagline: 'Уриа үг', phone: 'Утас 1', phone2: 'Утас 2',
   email: 'Имэйл', address: 'Хаяг', work_hours: 'Ажиллах цаг',
   delivery_fee: 'Хотын хүргэлтийн үнэ (₮)', free_delivery_from: 'Үнэгүй хүргэлтийн доод дүн (₮)',
@@ -973,9 +1057,9 @@ const SETTING_LABELS = {
 
 async function pageSettings() {
   setHead('Тохиргоо', 'Дэлгүүрийн ерөнхий мэдээлэл');
-  const d = await api('/api/admin/settings');
+  const d = await api<{ settings: Record<string, string> }>('/api/admin/settings');
 
-  const group = (keys) => keys.map((k) => `
+  const group = (keys: string[]) => keys.map((k) => `
     <div class="field"><label>${SETTING_LABELS[k] || k}</label>
       <input name="${k}" value="${esc(d.settings[k] ?? '')}"></div>`).join('');
 
@@ -1015,9 +1099,9 @@ async function pageSettings() {
   $('#setForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api('/api/admin/settings', { method: 'PATCH', body: Object.fromEntries(new FormData(e.target)) });
+      await api('/api/admin/settings', { method: 'PATCH', body: Object.fromEntries(new FormData(e.target as HTMLFormElement)) });
       toast('Тохиргоо хадгалагдлаа', 'ok');
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err: any) { toast(err.message, 'err'); }
   });
 }
 
@@ -1027,11 +1111,11 @@ async function pageSettings() {
 // ---------------------------------------------------------------------------
 // Барааны зураг удирдах (засах цонх дотор)
 // ---------------------------------------------------------------------------
-function mountPhotoManager(productId, initial) {
+function mountPhotoManager(productId: number, initial: ProductImage[]) {
   let images = [...initial];
   const grid = $('#photoGrid');
   const status = $('#photoStatus');
-  const input = $('#photoInput');
+  const input = $<HTMLInputElement>('#photoInput');
   const drop = $('#photoDrop');
   if (!grid) return;
 
@@ -1053,21 +1137,21 @@ function mountPhotoManager(productId, initial) {
         await api(`/api/admin/products/${productId}/images/${b.dataset.imgdel}`, { method: 'DELETE' });
         images = images.filter((x) => String(x.id) !== b.dataset.imgdel);
         draw(); loadProducts();
-      } catch (err) { toast(err.message, 'err'); }
+      } catch (err: any) { toast(err.message, 'err'); }
     }));
     $$('[data-imgfirst]', grid).forEach((b) => b.addEventListener('click', async () => {
       const id = Number(b.dataset.imgfirst);
       const order = [id, ...images.map((x) => x.id).filter((x) => x !== id)];
       try {
-        const r = await api(`/api/admin/products/${productId}/images`, { method: 'PATCH', body: { order } });
+        const r = await api<{ images: ProductImage[] }>(`/api/admin/products/${productId}/images`, { method: 'PATCH', body: { order } });
         images = r.images;
         draw(); loadProducts();
         toast('Үндсэн зураг солигдлоо', 'ok');
-      } catch (err) { toast(err.message, 'err'); }
+      } catch (err: any) { toast(err.message, 'err'); }
     }));
   };
 
-  const upload = async (files) => {
+  const upload = async (files: FileList) => {
     const list = [...files].filter((f) => f.type.startsWith('image/'));
     if (!list.length) return toast('Зөвхөн зураг оруулна уу', 'err');
     const fd = new FormData();
@@ -1082,13 +1166,13 @@ function mountPhotoManager(productId, initial) {
       draw(); loadProducts();
       status.textContent = data.errors?.length ? `Алдаа: ${data.errors.join('; ')}` : '';
       toast(`${data.images.length} зураг нэмэгдлээ`, 'ok');
-    } catch (err) {
+    } catch (err: any) {
       status.textContent = '';
       toast(err.message, 'err');
     } finally { drop.classList.remove('busy'); }
   };
 
-  input.addEventListener('change', () => { if (input.files.length) upload(input.files); input.value = ''; });
+  input.addEventListener('change', () => { if (input.files!.length) upload(input.files!); input.value = ''; });
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', (e) => { if (e.dataTransfer?.files?.length) upload(e.dataTransfer.files); });
@@ -1104,7 +1188,7 @@ async function pageReports() {
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  const card = (title, desc, href, extra = '') => `
+  const card = (title: string, desc: string, href: string, extra = '') => `
     <div class="box">
       <div class="box-body">
         <h3 style="margin:0 0 6px;font-size:1.02rem">${title}</h3>
@@ -1139,12 +1223,12 @@ async function pageReports() {
       Багана бүгд нэг нүдэнд орж байвал <a href="#" id="sepToggle">цэг таслалаар тусгаарлах</a> хувилбарыг ашиглана уу.</p>
     </div></div>`;
 
-  const ordersLink = $('#reportGrid a[href*="orders.csv"]');
+  const ordersLink = $<HTMLAnchorElement>('#reportGrid a[href*="orders.csv"]');
   const syncOrders = () => {
     const p = new URLSearchParams();
-    if ($('#rFrom').value) p.set('from', $('#rFrom').value);
-    if ($('#rTo').value) p.set('to', $('#rTo').value);
-    if ($('#rStatus').value) p.set('status', $('#rStatus').value);
+    if ($<HTMLInputElement>('#rFrom').value) p.set('from', $<HTMLInputElement>('#rFrom').value);
+    if ($<HTMLInputElement>('#rTo').value) p.set('to', $<HTMLInputElement>('#rTo').value);
+    if ($<HTMLSelectElement>('#rStatus').value) p.set('status', $<HTMLSelectElement>('#rStatus').value);
     if (state.sep) p.set('sep', 'semicolon');
     ordersLink.href = '/api/admin/export/orders.csv?' + p.toString();
   };
@@ -1152,7 +1236,7 @@ async function pageReports() {
   $('#sepToggle').addEventListener('click', (e) => {
     e.preventDefault();
     state.sep = !state.sep;
-    $$('#reportGrid a[download]').forEach((a) => {
+    $$<HTMLAnchorElement>('#reportGrid a[download]').forEach((a) => {
       const u = new URL(a.href, location.origin);
       if (state.sep) u.searchParams.set('sep', 'semicolon'); else u.searchParams.delete('sep');
       a.href = u.pathname + u.search;
@@ -1167,9 +1251,9 @@ async function pageReports() {
 async function pagePayments() {
   setHead('Төлбөр', 'QPay нэхэмжлэх, төлөлтийн түүх');
   $('#content').innerHTML = `<div class="box"><div class="box-body"><div class="sk" style="height:300px"></div></div></div>`;
-  const { items, live } = await api('/api/admin/payments');
+  const { items, live } = await api<PaymentsResp>('/api/admin/payments');
 
-  const PST = { pending: ['Хүлээгдэж буй', 'chip-gold'], paid: ['Төлөгдсөн', 'chip-ok'], cancelled: ['Цуцлагдсан', ''], failed: ['Амжилтгүй', 'chip-danger'] };
+  const PST: Record<string, [string, string]> = { pending: ['Хүлээгдэж буй', 'chip-gold'], paid: ['Төлөгдсөн', 'chip-ok'], cancelled: ['Цуцлагдсан', ''], failed: ['Амжилтгүй', 'chip-danger'] };
   const paidSum = items.filter((p) => p.status === 'paid').reduce((s, p) => s + p.paid_amount, 0);
 
   $('#content').innerHTML = `
@@ -1208,10 +1292,10 @@ async function pageSms() {
   setHead('Мессеж', 'Үйлчлүүлэгчид илгээсэн SMS',
     `<button class="btn btn-outline" id="smsTest">${icon('spark', 16)} Туршилтын SMS</button>`);
   $('#content').innerHTML = `<div class="box"><div class="box-body"><div class="sk" style="height:300px"></div></div></div>`;
-  const { items, stats, live, provider } = await api('/api/admin/sms');
+  const { items, stats, live, provider } = await api<SmsResp>('/api/admin/sms');
 
-  const KIND = { order: 'Захиалга', status: 'Төлөв', reset: 'Нууц үг', test: 'Туршилт', other: 'Бусад' };
-  const SST = { sent: ['Илгээсэн', 'chip-ok'], failed: ['Амжилтгүй', 'chip-danger'], queued: ['Хүлээгдэж буй', 'chip-gold'] };
+  const KIND: Record<string, string> = { order: 'Захиалга', status: 'Төлөв', reset: 'Нууц үг', test: 'Туршилт', other: 'Бусад' };
+  const SST: Record<string, [string, string]> = { sent: ['Илгээсэн', 'chip-ok'], failed: ['Амжилтгүй', 'chip-danger'], queued: ['Хүлээгдэж буй', 'chip-gold'] };
 
   $('#content').innerHTML = `
     <div class="stat-grid" style="margin-bottom:16px">
@@ -1249,12 +1333,12 @@ async function pageSms() {
       `<button class="btn btn-outline" id="smsCancel">Болих</button><button class="btn" id="smsSend">Илгээх</button>`);
     $('#smsCancel').addEventListener('click', closeSheet);
     $('#smsSend').addEventListener('click', async () => {
-      const f = Object.fromEntries(new FormData($('#smsForm')));
+      const f = Object.fromEntries(new FormData($<HTMLFormElement>('#smsForm')));
       try {
-        const r = await api('/api/admin/sms/test', { method: 'POST', body: f });
+        const r = await api<{ result: { mock?: boolean } }>('/api/admin/sms/test', { method: 'POST', body: f });
         toast(r.result.mock ? 'Туршилтын горимд бүртгэгдлээ' : 'Илгээгдлээ', 'ok');
         closeSheet(); pageSms();
-      } catch (err) { toast(err.message, 'err'); }
+      } catch (err: any) { toast(err.message, 'err'); }
     });
   });
 }
@@ -1265,9 +1349,9 @@ async function pageSms() {
 async function pageIntegrations() {
   setHead('Холболт', 'QPay төлбөр, SMS мэдэгдлийн тохиргоо');
   $('#content').innerHTML = `<div class="box"><div class="box-body"><div class="sk" style="height:300px"></div></div></div>`;
-  const s = await api('/api/admin/integrations');
+  const s = await api<IntegrationsInfo>('/api/admin/integrations');
 
-  const pill = (on) => `<span class="chip ${on ? 'chip-ok' : 'chip-gold'}">${on ? 'Идэвхтэй (live)' : 'Туршилтын горим'}</span>`;
+  const pill = (on: boolean) => `<span class="chip ${on ? 'chip-ok' : 'chip-gold'}">${on ? 'Идэвхтэй (live)' : 'Туршилтын горим'}</span>`;
 
   $('#content').innerHTML = `
     <div class="box" style="margin-bottom:16px"><div class="box-body">
@@ -1314,7 +1398,7 @@ TWILIO_FROM=+1xxxxxxxxxx</pre>
     </div></div>`;
 }
 
-const PAGES = {
+const PAGES: Record<string, () => Promise<void>> = {
   dash: pageDash, orders: pageOrders, products: pageProducts,
   categories: pageCategories, promos: pagePromos,
   customers: pageCustomers, payments: pagePayments, sms: pageSms,
@@ -1328,7 +1412,7 @@ async function route() {
   if ($('#sheet')?.classList.contains('on')) closeSheet();
   try {
     await PAGES[state.page]();
-  } catch (err) {
+  } catch (err: any) {
     if (/эрх|Нэвтэр/i.test(err.message)) { state.user = null; loginView(); return; }
     $('#content').innerHTML = `<div class="box"><div class="box-body"><div class="empty">
       <h3>Алдаа гарлаа</h3><p>${esc(err.message)}</p></div></div></div>`;
@@ -1343,7 +1427,7 @@ window.addEventListener('hashchange', route);
 async function boot() {
   shell();
   try {
-    const c = await api('/api/admin/categories');
+    const c = await api<ListResp<Category>>('/api/admin/categories');
     state.cats = c.items;
   } catch { /* дараа нь ачаална */ }
   await route();
@@ -1359,7 +1443,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet
 
 (async function init() {
   try {
-    const b = await api('/api/bootstrap');
+    const b = await api<{ user?: AdminUser }>('/api/bootstrap');
     if (b.user && b.user.role === 'admin') {
       state.user = b.user;
       await boot();

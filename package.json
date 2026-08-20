@@ -3,15 +3,23 @@
   "version": "1.0.0",
   "private": true,
   "description": "Khishgee's Salon — үс, хумсны бүтээгдэхүүний онлайн дэлгүүр",
-  "type": "commonjs",
-  "main": "server/index.js",
+  "type": "module",
+  "main": "server/index.ts",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node --watch server/index.js",
-    "reset": "node server/reset.js",
-    "test": "node test/run.js"
+    "build": "tsc -p tsconfig.app.json && tsc -p tsconfig.admin.json && tsc -p tsconfig.sw.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.admin.json --noEmit && tsc -p tsconfig.sw.json --noEmit",
+    "prestart": "npm run build",
+    "start": "node server/index.ts",
+    "predev": "npm run build",
+    "dev": "node --watch server/index.ts",
+    "reset": "node server/reset.ts",
+    "test": "node test/run.ts"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=23.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
   }
 }

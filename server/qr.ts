@@ -1,12 +1,10 @@
-'use strict';
-
 // ---------------------------------------------------------------------------
 // QR код үүсгэгч — байт (8-bit) горим, алдаа засах түвшин M, хувилбар 1–20.
 // Гадаад сан ашиглаагүй; QPay-ийн qr_text-ийг зурагт хөрвүүлэхэд хэрэглэнэ.
 // ---------------------------------------------------------------------------
 
 // [ec codewords/block, group1 blocks, group1 data cw, group2 blocks, group2 data cw]
-const EC_M = {
+export const EC_M: Record<number, [number, number, number, number, number]> = {
   1: [10, 1, 16, 0, 0],    2: [16, 1, 28, 0, 0],    3: [26, 1, 44, 0, 0],
   4: [18, 2, 32, 0, 0],    5: [24, 2, 43, 0, 0],    6: [16, 4, 27, 0, 0],
   7: [18, 4, 31, 0, 0],    8: [22, 2, 38, 2, 39],   9: [22, 3, 36, 2, 37],
@@ -16,13 +14,13 @@ const EC_M = {
   19: [26, 3, 44, 11, 45], 20: [26, 3, 41, 13, 42],
 };
 
-const TOTAL_CODEWORDS = {
+export const TOTAL_CODEWORDS: Record<number, number> = {
   1: 26, 2: 44, 3: 70, 4: 100, 5: 134, 6: 172, 7: 196, 8: 242, 9: 292, 10: 346,
   11: 404, 12: 466, 13: 532, 14: 581, 15: 655, 16: 733, 17: 815, 18: 901,
   19: 991, 20: 1085,
 };
 
-const ALIGN = {
+const ALIGN: Record<number, number[]> = {
   1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30], 6: [6, 34],
   7: [6, 22, 38], 8: [6, 24, 42], 9: [6, 26, 46], 10: [6, 28, 50],
   11: [6, 30, 54], 12: [6, 32, 58], 13: [6, 34, 62], 14: [6, 26, 46, 66],
@@ -44,12 +42,12 @@ const LOG = new Uint8Array(256);
   for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
 })();
 
-const gfMul = (a, b) => (a === 0 || b === 0 ? 0 : EXP[LOG[a] + LOG[b]]);
+const gfMul = (a: number, b: number): number => (a === 0 || b === 0 ? 0 : EXP[LOG[a] + LOG[b]]);
 
-function rsGenerator(degree) {
+function rsGenerator(degree: number): number[] {
   let poly = [1];
   for (let i = 0; i < degree; i++) {
-    const next = new Array(poly.length + 1).fill(0);
+    const next: number[] = new Array(poly.length + 1).fill(0);
     for (let j = 0; j < poly.length; j++) {
       next[j] ^= gfMul(poly[j], EXP[i]);
       next[j + 1] ^= poly[j];
@@ -59,9 +57,9 @@ function rsGenerator(degree) {
   return poly;
 }
 
-function rsEncode(data, ecLen) {
+function rsEncode(data: number[], ecLen: number): number[] {
   const gen = rsGenerator(ecLen);
-  const res = new Array(ecLen).fill(0);
+  const res: number[] = new Array(ecLen).fill(0);
   for (const byte of data) {
     const factor = byte ^ res[0];
     res.shift();
@@ -73,15 +71,15 @@ function rsEncode(data, ecLen) {
 
 // ------------------------------ Bit буфер -----------------------------------
 class BitBuffer {
-  constructor() { this.bits = []; }
-  put(value, length) {
+  bits: number[] = [];
+  put(value: number, length: number): void {
     for (let i = length - 1; i >= 0; i--) this.bits.push((value >>> i) & 1);
   }
-  get length() { return this.bits.length; }
+  get length(): number { return this.bits.length; }
 }
 
 // --------------------------- Өгөгдлийг кодлох -------------------------------
-function chooseVersion(byteLen) {
+function chooseVersion(byteLen: number): number {
   for (let v = 1; v <= 20; v++) {
     const [ec, g1b, g1d, g2b, g2d] = EC_M[v];
     const dataCw = g1b * g1d + g2b * g2d;
@@ -96,7 +94,7 @@ function chooseVersion(byteLen) {
   throw new Error('Өгөгдөл хэт урт байна (QR v20-M багтахгүй)');
 }
 
-function buildCodewords(bytes, version) {
+function buildCodewords(bytes: number[], version: number): number[] {
   const [ecLen, g1b, g1d, g2b, g2d] = EC_M[version];
   const dataCw = g1b * g1d + g2b * g2d;
   const buf = new BitBuffer();
@@ -110,7 +108,7 @@ function buildCodewords(bytes, version) {
   buf.put(0, term);
   while (buf.length % 8 !== 0) buf.bits.push(0);
 
-  const words = [];
+  const words: number[] = [];
   for (let i = 0; i < buf.length; i += 8) {
     let byte = 0;
     for (let j = 0; j < 8; j++) byte = (byte << 1) | buf.bits[i + j];
@@ -122,14 +120,14 @@ function buildCodewords(bytes, version) {
   while (words.length < dataCw) words.push(PAD[p++ % 2]);
 
   // Блокчлол
-  const blocks = [];
+  const blocks: number[][] = [];
   let pos = 0;
   for (let i = 0; i < g1b; i++) { blocks.push(words.slice(pos, pos + g1d)); pos += g1d; }
   for (let i = 0; i < g2b; i++) { blocks.push(words.slice(pos, pos + g2d)); pos += g2d; }
   const ecBlocks = blocks.map((b) => rsEncode(b, ecLen));
 
   // Хооронд нь сүлжих
-  const out = [];
+  const out: number[] = [];
   const maxData = Math.max(...blocks.map((b) => b.length));
   for (let i = 0; i < maxData; i++) {
     for (const b of blocks) if (i < b.length) out.push(b[i]);
@@ -141,7 +139,15 @@ function buildCodewords(bytes, version) {
 }
 
 // ------------------------------ Матриц --------------------------------------
-function versionBits(version) {
+type Matrix = (number | null)[][];
+
+type MatrixState = {
+  modules: Matrix;
+  reserved: boolean[][];
+  size: number;
+};
+
+export function versionBits(version: number): number {
   let d = version << 12;
   for (let i = 0; i < 6; i++) {
     if (d & (1 << (17 - i))) d ^= 0x1f25 << (5 - i);
@@ -149,7 +155,7 @@ function versionBits(version) {
   return (version << 12) | d;
 }
 
-function formatBits(maskId) {
+export function formatBits(maskId: number): number {
   // EC түвшин M = 0b00
   const data = (0b00 << 3) | maskId;
   let d = data << 10;
@@ -159,15 +165,15 @@ function formatBits(maskId) {
   return ((data << 10) | d) ^ 0b101010000010010;
 }
 
-function createMatrix(version) {
+export function createMatrix(version: number): MatrixState {
   const size = version * 4 + 17;
-  const modules = Array.from({ length: size }, () => new Array(size).fill(null));
-  const reserved = Array.from({ length: size }, () => new Array(size).fill(false));
+  const modules: Matrix = Array.from({ length: size }, () => new Array(size).fill(null));
+  const reserved: boolean[][] = Array.from({ length: size }, () => new Array(size).fill(false));
 
-  const setF = (r, c, v) => { modules[r][c] = v; reserved[r][c] = true; };
+  const setF = (r: number, c: number, v: number): void => { modules[r][c] = v; reserved[r][c] = true; };
 
   // Хайлтын хэв (finder) + тусгаарлагч
-  const finder = (row, col) => {
+  const finder = (row: number, col: number): void => {
     for (let r = -1; r <= 7; r++) {
       for (let c = -1; c <= 7; c++) {
         const rr = row + r;
@@ -232,9 +238,9 @@ function createMatrix(version) {
   return { modules, reserved, size };
 }
 
-function placeData(state, codewords) {
+function placeData(state: MatrixState, codewords: number[]): MatrixState {
   const { modules, reserved, size } = state;
-  const bits = [];
+  const bits: number[] = [];
   for (const cw of codewords) {
     for (let i = 7; i >= 0; i--) bits.push((cw >> i) & 1);
   }
@@ -257,10 +263,10 @@ function placeData(state, codewords) {
   return state;
 }
 
-const MASKS = [
+export const MASKS: ((r: number, c: number) => boolean)[] = [
   (r, c) => (r + c) % 2 === 0,
   (r) => r % 2 === 0,
-  (r, c) => c % 3 === 0,
+  (_r, c) => c % 3 === 0,
   (r, c) => (r + c) % 3 === 0,
   (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,
   (r, c) => ((r * c) % 2) + ((r * c) % 3) === 0,
@@ -268,9 +274,9 @@ const MASKS = [
   (r, c) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0,
 ];
 
-function applyMask(state, maskId) {
+function applyMask(state: MatrixState, maskId: number): number[][] {
   const { modules, reserved, size } = state;
-  const out = modules.map((row) => row.slice());
+  const out = modules.map((row) => row.slice()) as number[][];
   const fn = MASKS[maskId];
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
@@ -281,7 +287,7 @@ function applyMask(state, maskId) {
   return out;
 }
 
-function writeFormat(matrix, size, maskId) {
+function writeFormat(matrix: number[][], size: number, maskId: number): void {
   const bits = formatBits(maskId);
   for (let i = 0; i < 15; i++) {
     const bit = (bits >> i) & 1;
@@ -298,7 +304,7 @@ function writeFormat(matrix, size, maskId) {
   matrix[size - 8][8] = 1;
 }
 
-function penalty(matrix, size) {
+function penalty(matrix: number[][], size: number): number {
   let score = 0;
   // Дүрэм 1 — эгнээ/баганад 5 буюу түүнээс олон ижил модуль
   for (let i = 0; i < size; i++) {
@@ -321,7 +327,8 @@ function penalty(matrix, size) {
   // Дүрэм 3 — 1:1:3:1:1 хэв
   const P1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];
   const P2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
-  const match = (line, start, pat) => pat.every((v, k) => line[start + k] === v);
+  const match = (line: number[], start: number, pat: number[]): boolean =>
+    pat.every((v, k) => line[start + k] === v);
   for (let i = 0; i < size; i++) {
     const rows = matrix[i];
     const cols = matrix.map((row) => row[i]);
@@ -340,23 +347,38 @@ function penalty(matrix, size) {
 }
 
 // ------------------------------- Нийтийн API --------------------------------
-function encode(text) {
+export type EncodedQr = {
+  matrix: number[][];
+  size: number;
+  version: number;
+  mask: number;
+  codewords: number[];
+};
+
+export function encode(text: string): EncodedQr {
   const bytes = Array.from(Buffer.from(String(text), 'utf8'));
   const version = chooseVersion(bytes.length);
   const codewords = buildCodewords(bytes, version);
   const state = placeData(createMatrix(version), codewords);
 
-  let best = null;
+  let best: { matrix: number[][]; score: number; mask: number } | null = null;
   for (let mask = 0; mask < 8; mask++) {
     const candidate = applyMask(state, mask);
     writeFormat(candidate, state.size, mask);
     const score = penalty(candidate, state.size);
     if (!best || score < best.score) best = { matrix: candidate, score, mask };
   }
-  return { matrix: best.matrix, size: state.size, version, mask: best.mask, codewords };
+  return { matrix: best!.matrix, size: state.size, version, mask: best!.mask, codewords };
 }
 
-function toSvg(text, opts = {}) {
+export type SvgOpts = {
+  quiet?: number;
+  scale?: number;
+  dark?: string;
+  light?: string;
+};
+
+export function toSvg(text: string, opts: SvgOpts = {}): string {
   const { matrix, size } = encode(text);
   const quiet = opts.quiet == null ? 4 : opts.quiet;
   const scale = opts.scale == null ? 8 : opts.scale;
@@ -378,5 +400,3 @@ function toSvg(text, opts = {}) {
     '<rect width="' + dim + '" height="' + dim + '" fill="' + light + '"/>' +
     '<path d="' + path + '" fill="' + dark + '"/></svg>';
 }
-
-module.exports = { encode, toSvg, EC_M, TOTAL_CODEWORDS, MASKS, formatBits, versionBits, createMatrix };

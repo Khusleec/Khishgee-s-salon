@@ -1,0 +1,15 @@
+{
+  // Service worker: src/client/sw.ts → public/sw.js
+  "compilerOptions": {
+    "target": "es2021",
+    "module": "es2022",
+    "lib": ["es2021", "webworker"],
+    "types": [],
+    "strict": true,
+    "rootDir": "src/client",
+    "outDir": "public",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "files": ["src/client/sw.ts"]
+}

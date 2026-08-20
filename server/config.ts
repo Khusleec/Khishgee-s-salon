@@ -1,5 +1,3 @@
-'use strict';
-
 // ---------------------------------------------------------------------------
 // Тохиргоо — .env файлаас уншина (гадаад сан ашиглахгүй)
 //
@@ -8,13 +6,13 @@
 // Жинхэнэ түлхүүрээ .env-д бичихэд ямар ч код өөрчлөхгүйгээр live болно.
 // ---------------------------------------------------------------------------
 
-const fs = require('node:fs');
-const path = require('node:path');
+import fs from 'node:fs';
+import path from 'node:path';
 
-const ENV_PATH = path.join(__dirname, '..', '.env');
+export const ENV_PATH = path.join(import.meta.dirname, '..', '.env');
 
-function parseEnv(text) {
-  const out = {};
+function parseEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
   for (const rawLine of String(text).split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
@@ -32,44 +30,48 @@ function parseEnv(text) {
   return out;
 }
 
-function loadEnv() {
-  let fileEnv = {};
+function loadEnv(): Record<string, string | undefined> {
+  let fileEnv: Record<string, string> = {};
   try {
     if (fs.existsSync(ENV_PATH)) fileEnv = parseEnv(fs.readFileSync(ENV_PATH, 'utf8'));
   } catch (e) {
-    console.warn('[config] .env уншиж чадсангүй:', e.message);
+    console.warn('[config] .env уншиж чадсангүй:', (e as Error).message);
   }
   // Процессын хувьсагч .env-ээс давамгайлна
   return { ...fileEnv, ...process.env };
 }
 
-const env = loadEnv();
+export const env = loadEnv();
 
-const get = (key, fallback = '') => {
+export const get = (key: string, fallback = ''): string => {
   const v = env[key];
   return v == null || v === '' ? fallback : String(v);
 };
 
-const bool = (key, fallback = false) => {
+export const bool = (key: string, fallback = false): boolean => {
   const v = get(key, '').toLowerCase();
   if (!v) return fallback;
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 };
 
 // ------------------------------- QPay --------------------------------------
-const qpay = {
+const qpayBase = {
   username: get('QPAY_USERNAME'),
   password: get('QPAY_PASSWORD'),
   invoiceCode: get('QPAY_INVOICE_CODE'),
   baseUrl: get('QPAY_BASE_URL', 'https://merchant.qpay.mn/v2'),
   callbackBase: get('PUBLIC_BASE_URL', `http://localhost:${get('PORT', '3000')}`),
 };
-// Гурван утга бүрэн байж байж жинхэнэ QPay руу залгана
-qpay.live = Boolean(qpay.username && qpay.password && qpay.invoiceCode);
+
+export const qpay = {
+  ...qpayBase,
+  // Гурван утга бүрэн байж байж жинхэнэ QPay руу залгана
+  live: Boolean(qpayBase.username && qpayBase.password && qpayBase.invoiceCode),
+};
 
 // -------------------------------- SMS --------------------------------------
 // provider: mock | http | twilio
-const sms = {
+const smsBase = {
   provider: get('SMS_PROVIDER', 'mock').toLowerCase(),
   from: get('SMS_FROM', 'Khishgee'),
   // Ерөнхий HTTP gateway (Монголын оператор/агрегаторуудад тохирно)
@@ -90,31 +92,34 @@ const sms = {
   notifyOnStatus: bool('SMS_NOTIFY_ON_STATUS', true),
 };
 
-sms.live = (() => {
-  if (sms.provider === 'http') return Boolean(sms.url);
-  if (sms.provider === 'twilio') return Boolean(sms.twilioSid && sms.twilioToken && sms.twilioFrom);
-  return false;
-})();
+export const sms = {
+  ...smsBase,
+  live: (() => {
+    if (smsBase.provider === 'http') return Boolean(smsBase.url);
+    if (smsBase.provider === 'twilio') {
+      return Boolean(smsBase.twilioSid && smsBase.twilioToken && smsBase.twilioFrom);
+    }
+    return false;
+  })(),
+};
 
 // ------------------------------ Зураг --------------------------------------
-const uploads = {
+export const uploads = {
   maxBytes: Number(get('UPLOAD_MAX_BYTES', String(5 * 1024 * 1024))),
-  dir: path.join(process.env.KS_DATA_DIR || path.join(__dirname, '..', 'data'), 'uploads'),
+  dir: path.join(process.env.KS_DATA_DIR || path.join(import.meta.dirname, '..', 'data'), 'uploads'),
 };
 
 // ---------------------------- Нууц үг сэргээх -------------------------------
-const reset = {
+export const reset = {
   ttlMinutes: Number(get('RESET_CODE_TTL_MIN', '15')),
   maxAttempts: Number(get('RESET_MAX_ATTEMPTS', '5')),
   // mock горимд кодыг хариунд буцаах эсэх (зөвхөн хөгжүүлэлтэд)
   revealInMock: bool('RESET_REVEAL_IN_MOCK', true),
 };
 
-function summary() {
+export function summary(): { qpay: string; sms: string } {
   return {
     qpay: qpay.live ? 'live' : 'mock',
     sms: sms.live ? `live (${sms.provider})` : 'mock',
   };
 }
-
-module.exports = { env, get, bool, qpay, sms, uploads, reset, summary, ENV_PATH };

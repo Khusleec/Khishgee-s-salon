@@ -1,11 +1,9 @@
-'use strict';
-
 // ---------------------------------------------------------------------------
 // PWA дүрсийг (PNG) кодоор үүсгэнэ — гадаад сан, зургийн файл шаардахгүй.
 // zlib нь Node-ийн дотоод модуль тул PNG-г гараар угсарч байна.
 // ---------------------------------------------------------------------------
 
-const zlib = require('node:zlib');
+import zlib from 'node:zlib';
 
 // -- CRC32 -------------------------------------------------------------------
 const CRC_TABLE = (() => {
@@ -18,13 +16,13 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
-function crc32(buf) {
+function crc32(buf: Buffer): number {
   let c = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]!) & 0xff]! ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function chunk(type, data) {
+function chunk(type: string, data: Buffer): Buffer {
   const len = Buffer.alloc(4);
   len.writeUInt32BE(data.length);
   const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
@@ -33,7 +31,7 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
-function encodePng(width, height, rgba) {
+function encodePng(width: number, height: number, rgba: Buffer): Buffer {
   const raw = Buffer.alloc((width * 4 + 1) * height);
   for (let y = 0; y < height; y++) {
     raw[y * (width * 4 + 1)] = 0; // filter: None
@@ -53,7 +51,7 @@ function encodePng(width, height, rgba) {
 }
 
 // -- Геометр -----------------------------------------------------------------
-function distToSegment(px, py, x1, y1, x2, y2) {
+function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
   const dx = x2 - x1, dy = y2 - y1;
   const len2 = dx * dx + dy * dy;
   let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
@@ -62,18 +60,20 @@ function distToSegment(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - cx, py - cy);
 }
 
-function insideRoundedRect(x, y, r) {
+function insideRoundedRect(x: number, y: number, r: number): boolean {
   // x, y ∈ [0,1]; булангийн радиус r
   const cx = Math.min(Math.max(x, r), 1 - r);
   const cy = Math.min(Math.max(y, r), 1 - r);
   return Math.hypot(x - cx, y - cy) <= r;
 }
 
-const lerp = (a, b, t) => a + (b - a) * t;
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+export type IconOpts = { maskable?: boolean; transparent?: boolean };
 
 // -- Дүрс зурах --------------------------------------------------------------
 // maskable = үйлдлийн систем дүрсийг тайрч болзошгүй тул тэмдгийг жижигрүүлнэ
-function drawIcon(size, { maskable = false, transparent = false } = {}) {
+function drawIcon(size: number, { maskable = false, transparent = false }: IconOpts = {}): Buffer {
   const rgba = Buffer.alloc(size * size * 4);
   const SS = 2;                        // supersampling
   const inset = maskable ? 0.18 : 0;   // safe zone
@@ -88,7 +88,7 @@ function drawIcon(size, { maskable = false, transparent = false } = {}) {
     down: { x1: 0.395, y1: 0.495, x2: 0.735, y2: 0.755 },
     thick: 0.048,
   };
-  const sc = (v) => mid + (v - mid) * scale;
+  const sc = (v: number) => mid + (v - mid) * scale;
 
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
@@ -110,7 +110,7 @@ function drawIcon(size, { maskable = false, transparent = false } = {}) {
 
           // Хазайсан градиент: plum → rose → gold
           const t = Math.min(1, Math.max(0, (x * 0.45 + y * 0.55)));
-          let cr, cg, cb;
+          let cr: number, cg: number, cb: number;
           if (t < 0.62) {
             const u = t / 0.62;
             cr = lerp(0x7b, 0xc9, u); cg = lerp(0x2e, 0x50, u); cb = lerp(0x52, 0x6e, u);
@@ -149,12 +149,10 @@ function drawIcon(size, { maskable = false, transparent = false } = {}) {
 }
 
 // -- Кэш ---------------------------------------------------------------------
-const cache = new Map();
+const cache = new Map<string, Buffer>();
 
-function getIcon(size, opts = {}) {
+export function getIcon(size: number, opts: IconOpts = {}): Buffer {
   const key = `${size}:${opts.maskable ? 'm' : 'a'}`;
   if (!cache.has(key)) cache.set(key, drawIcon(size, opts));
-  return cache.get(key);
+  return cache.get(key)!;
 }
-
-module.exports = { getIcon };

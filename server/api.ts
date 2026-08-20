@@ -1,16 +1,22 @@
-'use strict';
-
-const crypto = require('node:crypto');
-const path = require('node:path');
-const { db, getSettings, setSetting, DEFAULT_SETTINGS } = require('./db');
-const { hashPassword, verifyPassword, newToken } = require('./auth');
-const { productSvg } = require('./images');
-const { getIcon } = require('./icons');
-const config = require('./config');
-const sms = require('./sms');
-const qpay = require('./qpay');
-const uploads = require('./uploads');
-const csv = require('./csv');
+import crypto from 'node:crypto';
+import path from 'node:path';
+import { db, getSettings, setSetting, DEFAULT_SETTINGS } from './db.ts';
+import { hashPassword, verifyPassword, newToken } from './auth.ts';
+import { productSvg } from './images.ts';
+import { getIcon } from './icons.ts';
+import * as config from './config.ts';
+import * as sms from './sms.ts';
+import * as qpay from './qpay.ts';
+import * as uploads from './uploads.ts';
+import * as csv from './csv.ts';
+import * as qr from './qr.ts';
+import type {
+  Ctx, Handler, Route,
+  CategoryRow, Product, ProductRow, ProductImageRow,
+  UserRow, Order, OrderRow, OrderItemRow,
+  PromoRow, PaymentRow, PasswordResetRow,
+} from './types.ts';
+import type { CsvValue } from './csv.ts';
 
 const SESSION_DAYS = 30;
 const STATUSES = ['new', 'confirmed', 'packed', 'shipping', 'delivered', 'cancelled'];
@@ -18,53 +24,53 @@ const STATUSES = ['new', 'confirmed', 'packed', 'shipping', 'delivered', 'cancel
 // ---------------------------------------------------------------------------
 // Туслах функцууд
 // ---------------------------------------------------------------------------
-const now = () => new Date().toISOString();
-const int = (v, d = 0) => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : d);
-const str = (v, max = 500) => String(v ?? '').trim().slice(0, max);
+const now = (): string => new Date().toISOString();
+const int = (v: unknown, d = 0): number => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : d);
+const str = (v: unknown, max = 500): string => String(v ?? '').trim().slice(0, max);
 
-function currentUser(ctx) {
+function currentUser(ctx: Ctx): UserRow | null {
   const token = ctx.cookies.sid;
   if (!token) return null;
   const row = db.prepare(`
     SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.token = ? AND s.expires_at > ?`).get(token, Date.now());
+    WHERE s.token = ? AND s.expires_at > ?`).get(token, Date.now()) as UserRow | undefined;
   return row || null;
 }
 
-function publicUser(u) {
+function publicUser(u: UserRow | null): Partial<UserRow> | null {
   if (!u) return null;
   const { id, name, phone, email, role, address, district, created_at } = u;
   return { id, name, phone, email, role, address, district, created_at };
 }
 
-function requireAuth(ctx) {
+function requireAuth(ctx: Ctx): UserRow | null {
   const u = currentUser(ctx);
   if (!u) { ctx.fail('Нэвтэрч орно уу', 401); return null; }
   return u;
 }
 
-function requireAdmin(ctx) {
+function requireAdmin(ctx: Ctx): UserRow | null {
   const u = currentUser(ctx);
   if (!u || u.role !== 'admin') { ctx.fail('Админ эрх шаардлагатай', 403); return null; }
   return u;
 }
 
-function startSession(ctx, userId) {
+function startSession(ctx: Ctx, userId: number | bigint): void {
   const token = newToken();
   const expires = Date.now() + SESSION_DAYS * 86400000;
   db.prepare('INSERT INTO sessions(token, user_id, expires_at) VALUES(?, ?, ?)').run(token, userId, expires);
   ctx.setCookie('sid', token, { maxAge: SESSION_DAYS * 86400 });
 }
 
-const normPhone = (p) => str(p, 20).replace(/[^0-9]/g, '');
+const normPhone = (p: unknown): string => str(p, 20).replace(/[^0-9]/g, '');
 
-function validPhone(p) {
+function validPhone(p: string): boolean {
   return /^[0-9]{8}$/.test(p);
 }
 
-function orderCode() {
+function orderCode(): string {
   const taken = db.prepare('SELECT 1 FROM orders WHERE code = ?');
-  const base = db.prepare('SELECT COUNT(*) AS n FROM orders').get().n;
+  const base = (db.prepare('SELECT COUNT(*) AS n FROM orders').get() as { n: number }).n;
   for (let i = 0; i < 50; i++) {
     const code = 'KS' + String(100001 + base + i) + crypto.randomInt(10, 99);
     if (!taken.get(code)) return code;
@@ -76,9 +82,9 @@ const listImages = db.prepare(
   'SELECT id, file, mime, width, height, sort FROM product_images WHERE product_id = ? ORDER BY sort, id'
 );
 
-function attachProductExtras(p) {
+function attachProductExtras(p: Product): Product {
   if (!p) return p;
-  const imgs = listImages.all(p.id);
+  const imgs = listImages.all(p.id) as ProductImageRow[];
   // Жинхэнэ зураг байвал түүнийг, байхгүй бол үүсгэсэн SVG-г үзүүлнэ
   p.images = imgs.map((im) => ({ ...im, url: `/img/u/${im.file}` }));
   p.image = p.images.length ? p.images[0].url : `/img/p/${p.id}.svg`;
@@ -92,13 +98,15 @@ const PRODUCT_COLUMNS = `p.*, c.slug AS category_slug, c.name AS category_name, 
 // ---------------------------------------------------------------------------
 // Маршрутууд
 // ---------------------------------------------------------------------------
-const routes = [];
-const on = (method, path, handler) => routes.push({ method, path, handler });
+const routes: Route[] = [];
+const on = (method: string, path: string, handler: Handler): number =>
+  routes.push({ method, path, handler });
 
 // ------------------------- Зураг ------------------------------------------
 on('GET', '/img/p/:id.svg', (ctx) => {
   const id = int(ctx.params.id);
-  const p = db.prepare('SELECT hue, shape, name, brand FROM products WHERE id = ?').get(id);
+  const p = db.prepare('SELECT hue, shape, name, brand FROM products WHERE id = ?').get(id) as
+    Pick<ProductRow, 'hue' | 'shape' | 'name' | 'brand'> | undefined;
   const svg = productSvg(p || { hue: 300, shape: 'bottle', brand: 'KS' });
   ctx.raw(Buffer.from(svg, 'utf8'), 'image/svg+xml; charset=utf-8', 200, {
     'Cache-Control': 'public, max-age=86400',
@@ -142,9 +150,10 @@ on('GET', '/api/bootstrap', (ctx) => {
   const categories = db.prepare(`
     SELECT c.*, (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.active = 1) AS count
     FROM categories c ORDER BY c.sort`).all();
-  const brands = db.prepare('SELECT DISTINCT brand FROM products WHERE active = 1 ORDER BY brand').all()
+  const brands = (db.prepare('SELECT DISTINCT brand FROM products WHERE active = 1 ORDER BY brand').all() as { brand: string }[])
     .map((r) => r.brand).filter(Boolean);
-  const range = db.prepare('SELECT MIN(price) AS min, MAX(price) AS max FROM products WHERE active = 1').get();
+  const range = db.prepare('SELECT MIN(price) AS min, MAX(price) AS max FROM products WHERE active = 1').get() as
+    { min: number | null; max: number | null };
   ctx.json({
     ok: true,
     settings: getSettings(),
@@ -159,7 +168,7 @@ on('GET', '/api/bootstrap', (ctx) => {
 on('GET', '/api/products', (ctx) => {
   const q = ctx.query;
   const where = ['p.active = 1'];
-  const args = [];
+  const args: (string | number)[] = [];
 
   if (q.kind && (q.kind === 'hair' || q.kind === 'nail')) { where.push('c.kind = ?'); args.push(q.kind); }
   if (q.category) { where.push('c.slug = ?'); args.push(str(q.category, 60)); }
@@ -177,7 +186,7 @@ on('GET', '/api/products', (ctx) => {
   if (q.badge) { where.push('p.badge = ?'); args.push(str(q.badge, 40)); }
   if (q.sale === '1') { where.push('p.compare_price IS NOT NULL AND p.compare_price > p.price'); }
 
-  const ORDERS = {
+  const ORDERS: Record<string, string> = {
     popular: 'p.sold DESC, p.rating DESC',
     new: 'p.created_at DESC',
     price_asc: 'p.price ASC',
@@ -185,20 +194,20 @@ on('GET', '/api/products', (ctx) => {
     rating: 'p.rating DESC, p.sold DESC',
     name: 'p.name ASC',
   };
-  const order = ORDERS[q.sort] || ORDERS.popular;
+  const order = (q.sort && ORDERS[q.sort]) || ORDERS.popular;
 
   const per = Math.min(48, Math.max(1, int(q.per, 12)));
   const page = Math.max(1, int(q.page, 1));
   const clause = where.join(' AND ');
 
-  const total = db.prepare(
+  const total = (db.prepare(
     `SELECT COUNT(*) AS n FROM products p JOIN categories c ON c.id = p.category_id WHERE ${clause}`
-  ).get(...args).n;
+  ).get(...args) as { n: number }).n;
 
-  const items = db.prepare(
+  const items = (db.prepare(
     `SELECT ${PRODUCT_COLUMNS} FROM products p JOIN categories c ON c.id = p.category_id
      WHERE ${clause} ORDER BY ${order} LIMIT ? OFFSET ?`
-  ).all(...args, per, (page - 1) * per).map(attachProductExtras);
+  ).all(...args, per, (page - 1) * per) as unknown as Product[]).map(attachProductExtras);
 
   ctx.json({ ok: true, items, total, page, per, pages: Math.max(1, Math.ceil(total / per)) });
 });
@@ -206,7 +215,7 @@ on('GET', '/api/products', (ctx) => {
 on('GET', '/api/products/:id', (ctx) => {
   const p = db.prepare(
     `SELECT ${PRODUCT_COLUMNS} FROM products p JOIN categories c ON c.id = p.category_id WHERE p.id = ?`
-  ).get(int(ctx.params.id));
+  ).get(int(ctx.params.id)) as Product | undefined;
   if (!p) return ctx.fail('Бүтээгдэхүүн олдсонгүй', 404);
   attachProductExtras(p);
 
@@ -214,10 +223,10 @@ on('GET', '/api/products/:id', (ctx) => {
     'SELECT id, name, rating, comment, created_at FROM reviews WHERE product_id = ? ORDER BY created_at DESC'
   ).all(p.id);
 
-  const related = db.prepare(
+  const related = (db.prepare(
     `SELECT ${PRODUCT_COLUMNS} FROM products p JOIN categories c ON c.id = p.category_id
      WHERE p.category_id = ? AND p.id != ? AND p.active = 1 ORDER BY p.sold DESC LIMIT 4`
-  ).all(p.category_id, p.id).map(attachProductExtras);
+  ).all(p.category_id, p.id) as unknown as Product[]).map(attachProductExtras);
 
   ctx.json({ ok: true, product: p, reviews, related });
 });
@@ -237,7 +246,7 @@ on('POST', '/api/products/:id/reviews', (ctx) => {
     'INSERT INTO reviews(product_id, user_id, name, rating, comment, created_at) VALUES(?, ?, ?, ?, ?, ?)'
   ).run(id, user?.id ?? null, name, rating, comment, now());
 
-  const agg = db.prepare('SELECT AVG(rating) AS a FROM reviews WHERE product_id = ?').get(id);
+  const agg = db.prepare('SELECT AVG(rating) AS a FROM reviews WHERE product_id = ?').get(id) as { a: number };
   db.prepare('UPDATE products SET rating = ? WHERE id = ?').run(Math.round(agg.a * 10) / 10, id);
 
   ctx.json({ ok: true });
@@ -247,7 +256,7 @@ on('POST', '/api/products/:id/reviews', (ctx) => {
 on('POST', '/api/promo/check', (ctx) => {
   const code = str(ctx.body.code, 40).toUpperCase();
   const subtotal = int(ctx.body.subtotal);
-  const promo = db.prepare('SELECT * FROM promos WHERE code = ? AND active = 1').get(code);
+  const promo = db.prepare('SELECT * FROM promos WHERE code = ? AND active = 1').get(code) as PromoRow | undefined;
   if (!promo) return ctx.fail('Ийм код олдсонгүй', 404);
   if (subtotal < promo.min_total) {
     return ctx.fail(`Энэ код ${promo.min_total.toLocaleString('mn-MN')}₮-с дээш захиалгад хүчинтэй`, 400);
@@ -262,7 +271,7 @@ on('POST', '/api/promo/check', (ctx) => {
 on('POST', '/api/orders', (ctx) => {
   const b = ctx.body || {};
   const user = currentUser(ctx);
-  const items = Array.isArray(b.items) ? b.items : [];
+  const items: { id?: unknown; qty?: unknown }[] = Array.isArray(b.items) ? b.items : [];
   if (!items.length) return ctx.fail('Сагс хоосон байна', 400);
 
   const name = str(b.name, 80);
@@ -278,10 +287,10 @@ on('POST', '/api/orders', (ctx) => {
 
   // Үнийг ҮРГЭЛЖ сервер талд дахин тооцно
   const getP = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1');
-  const lines = [];
+  const lines: { p: ProductRow; qty: number }[] = [];
   let subtotal = 0;
   for (const it of items) {
-    const p = getP.get(int(it.id));
+    const p = getP.get(int(it.id)) as ProductRow | undefined;
     if (!p) return ctx.fail('Захиалгад байхгүй бүтээгдэхүүн орсон байна', 400);
     const qty = Math.max(1, Math.min(99, int(it.qty, 1)));
     if (p.stock < qty) return ctx.fail(`"${p.name}" — үлдэгдэл хүрэлцэхгүй байна (${p.stock}ш)`, 409);
@@ -298,7 +307,7 @@ on('POST', '/api/orders', (ctx) => {
   let promoCode = '';
   if (b.promo_code) {
     const promo = db.prepare('SELECT * FROM promos WHERE code = ? AND active = 1')
-      .get(str(b.promo_code, 40).toUpperCase());
+      .get(str(b.promo_code, 40).toUpperCase()) as PromoRow | undefined;
     if (promo && subtotal >= promo.min_total) {
       discount = promo.type === 'percent'
         ? Math.round(subtotal * promo.value / 100)
@@ -311,7 +320,7 @@ on('POST', '/api/orders', (ctx) => {
   const code = orderCode();
   const ts = now();
 
-  const tx = () => {
+  const tx = (): void => {
     const res = db.prepare(`
       INSERT INTO orders(code, user_id, customer_name, phone, district, address, note,
                          delivery_method, payment_method, subtotal, delivery_fee, discount,
@@ -334,7 +343,7 @@ on('POST', '/api/orders', (ctx) => {
   try { tx(); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
 
   // Захиалга амжилттай үүссэний дараа SMS (алдаа гарсан ч захиалгад нөлөөлөхгүй)
-  const created = db.prepare('SELECT * FROM orders WHERE code = ?').get(code);
+  const created = db.prepare('SELECT * FROM orders WHERE code = ?').get(code) as unknown as OrderRow;
   sms.notifyOrderCreated(created);
 
   ctx.json({
@@ -349,10 +358,10 @@ on('POST', '/api/orders', (ctx) => {
   });
 });
 
-function loadOrder(where, ...args) {
-  const order = db.prepare(`SELECT * FROM orders WHERE ${where}`).get(...args);
+function loadOrder(where: string, ...args: (string | number)[]): Order | null {
+  const order = db.prepare(`SELECT * FROM orders WHERE ${where}`).get(...args) as Order | undefined;
   if (!order) return null;
-  order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+  order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id) as unknown as OrderItemRow[];
   return order;
 }
 
@@ -387,14 +396,14 @@ on('POST', '/api/auth/register', (ctx) => {
   ).run(name, phone, str(ctx.body.email, 120), hashPassword(password), 'customer', now());
 
   startSession(ctx, res.lastInsertRowid);
-  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(res.lastInsertRowid);
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(res.lastInsertRowid) as unknown as UserRow;
   ctx.json({ ok: true, user: publicUser(u) });
 });
 
 on('POST', '/api/auth/login', (ctx) => {
   const phone = normPhone(ctx.body.phone);
   const password = String(ctx.body.password || '');
-  const u = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+  const u = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone) as UserRow | undefined;
   if (!u || !verifyPassword(password, u.password_hash)) {
     return ctx.fail('Утас эсвэл нууц үг буруу байна', 401);
   }
@@ -412,9 +421,9 @@ on('GET', '/api/me', (ctx) => {
   const u = requireAuth(ctx); if (!u) return;
   const orders = db.prepare(
     'SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 50'
-  ).all(u.id);
+  ).all(u.id) as unknown as Order[];
   const getItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?');
-  for (const o of orders) o.items = getItems.all(o.id);
+  for (const o of orders) o.items = getItems.all(o.id) as unknown as OrderItemRow[];
   ctx.json({ ok: true, user: publicUser(u), orders });
 });
 
@@ -423,7 +432,7 @@ on('PATCH', '/api/me', (ctx) => {
   const name = str(ctx.body.name, 80) || u.name;
   db.prepare('UPDATE users SET name = ?, email = ?, address = ?, district = ? WHERE id = ?')
     .run(name, str(ctx.body.email, 120), str(ctx.body.address, 300), str(ctx.body.district, 80), u.id);
-  ctx.json({ ok: true, user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(u.id)) });
+  ctx.json({ ok: true, user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(u.id) as unknown as UserRow) });
 });
 
 // ---------------------------------------------------------------------------
@@ -435,7 +444,7 @@ on('GET', '/api/admin/stats', (ctx) => {
 
   const totals = db.prepare(`
     SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS revenue
-    FROM orders WHERE ${paid}`).get();
+    FROM orders WHERE ${paid}`).get() as { orders: number; revenue: number };
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayRow = db.prepare(`
@@ -448,7 +457,8 @@ on('GET', '/api/admin/stats', (ctx) => {
     FROM orders WHERE ${paid} AND created_at >= ?`).get(month.toISOString());
 
   const byStatus = Object.fromEntries(STATUSES.map((s) => [s, 0]));
-  for (const r of db.prepare('SELECT status, COUNT(*) AS n FROM orders GROUP BY status').all()) {
+  for (const r of db.prepare('SELECT status, COUNT(*) AS n FROM orders GROUP BY status').all() as
+    { status: string; n: number }[]) {
     byStatus[r.status] = r.n;
   }
 
@@ -460,7 +470,7 @@ on('GET', '/api/admin/stats', (ctx) => {
     const row = db.prepare(`
       SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
       FROM orders WHERE ${paid} AND created_at >= ? AND created_at < ?`)
-      .get(from.toISOString(), to.toISOString());
+      .get(from.toISOString(), to.toISOString()) as { revenue: number; orders: number };
     series.push({
       date: from.toISOString().slice(0, 10),
       label: `${from.getMonth() + 1}/${from.getDate()}`,
@@ -493,8 +503,8 @@ on('GET', '/api/admin/stats', (ctx) => {
     LEFT JOIN orders o ON o.id = oi.order_id AND o.status != 'cancelled'
     GROUP BY c.id ORDER BY revenue DESC`).all();
 
-  const customers = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'customer'").get().n;
-  const products = db.prepare('SELECT COUNT(*) AS n FROM products WHERE active = 1').get().n;
+  const customers = (db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'customer'").get() as { n: number }).n;
+  const products = (db.prepare('SELECT COUNT(*) AS n FROM products WHERE active = 1').get() as { n: number }).n;
 
   ctx.json({
     ok: true,
@@ -507,8 +517,8 @@ on('GET', '/api/admin/stats', (ctx) => {
 
 on('GET', '/api/admin/orders', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
-  const where = [];
-  const args = [];
+  const where: string[] = [];
+  const args: (string | number)[] = [];
   if (ctx.query.status && STATUSES.includes(ctx.query.status)) {
     where.push('status = ?'); args.push(ctx.query.status);
   }
@@ -518,21 +528,21 @@ on('GET', '/api/admin/orders', (ctx) => {
     args.push(like, like, like);
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = db.prepare(`SELECT COUNT(*) AS n FROM orders ${clause}`).get(...args).n;
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM orders ${clause}`).get(...args) as { n: number }).n;
   const per = Math.min(100, Math.max(5, int(ctx.query.per, 25)));
   const page = Math.max(1, int(ctx.query.page, 1));
   const items = db.prepare(
     `SELECT * FROM orders ${clause} ORDER BY created_at DESC LIMIT ? OFFSET ?`
-  ).all(...args, per, (page - 1) * per);
+  ).all(...args, per, (page - 1) * per) as unknown as Order[];
   const getItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?');
-  for (const o of items) o.items = getItems.all(o.id);
+  for (const o of items) o.items = getItems.all(o.id) as unknown as OrderItemRow[];
   ctx.json({ ok: true, items, total, page, per, pages: Math.max(1, Math.ceil(total / per)) });
 });
 
 on('PATCH', '/api/admin/orders/:id', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
   const id = int(ctx.params.id);
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as OrderRow | undefined;
   if (!order) return ctx.fail('Захиалга олдсонгүй', 404);
 
   const status = str(ctx.body.status, 20);
@@ -540,18 +550,20 @@ on('PATCH', '/api/admin/orders/:id', (ctx) => {
 
   // Цуцлахад үлдэгдлийг буцаана
   if (status === 'cancelled' && order.status !== 'cancelled') {
-    const items = db.prepare('SELECT product_id, qty FROM order_items WHERE order_id = ?').all(id);
+    const items = db.prepare('SELECT product_id, qty FROM order_items WHERE order_id = ?').all(id) as
+      Pick<OrderItemRow, 'product_id' | 'qty'>[];
     const inc = db.prepare('UPDATE products SET stock = stock + ?, sold = MAX(0, sold - ?) WHERE id = ?');
     for (const it of items) if (it.product_id) inc.run(it.qty, it.qty, it.product_id);
   }
   if (order.status === 'cancelled' && status !== 'cancelled') {
-    const items = db.prepare('SELECT product_id, qty FROM order_items WHERE order_id = ?').all(id);
+    const items = db.prepare('SELECT product_id, qty FROM order_items WHERE order_id = ?').all(id) as
+      Pick<OrderItemRow, 'product_id' | 'qty'>[];
     const dec = db.prepare('UPDATE products SET stock = MAX(0, stock - ?), sold = sold + ? WHERE id = ?');
     for (const it of items) if (it.product_id) dec.run(it.qty, it.qty, it.product_id);
   }
 
   db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?').run(status, now(), id);
-  const updated = loadOrder('id = ?', id);
+  const updated = loadOrder('id = ?', id)!;
 
   // Төлөв солигдсоныг үйлчлүүлэгчид мэдэгдэнэ
   if (status !== order.status) sms.notifyOrderStatus(updated);
@@ -561,8 +573,8 @@ on('PATCH', '/api/admin/orders/:id', (ctx) => {
 
 on('GET', '/api/admin/products', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
-  const where = [];
-  const args = [];
+  const where: string[] = [];
+  const args: (string | number)[] = [];
   if (ctx.query.q) {
     const like = `%${str(ctx.query.q, 60)}%`;
     where.push('(p.name LIKE ? OR p.sku LIKE ? OR p.brand LIKE ?)');
@@ -571,17 +583,19 @@ on('GET', '/api/admin/products', (ctx) => {
   if (ctx.query.category) { where.push('c.slug = ?'); args.push(str(ctx.query.category, 60)); }
   if (ctx.query.stock === 'low') where.push('p.stock <= 20');
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const items = db.prepare(
+  const items = (db.prepare(
     `SELECT ${PRODUCT_COLUMNS} FROM products p JOIN categories c ON c.id = p.category_id
      ${clause} ORDER BY p.id DESC`
-  ).all(...args).map(attachProductExtras);
+  ).all(...args) as unknown as Product[]).map(attachProductExtras);
   ctx.json({ ok: true, items });
 });
 
 const PRODUCT_FIELDS = ['sku', 'name', 'brand', 'category_id', 'price', 'compare_price', 'stock',
-  'hue', 'shape', 'badge', 'volume', 'short', 'description', 'howto', 'ingredients', 'active'];
+  'hue', 'shape', 'badge', 'volume', 'short', 'description', 'howto', 'ingredients', 'active'] as const;
 
-function readProductBody(b) {
+type ProductBody = Record<(typeof PRODUCT_FIELDS)[number], string | number | null>;
+
+function readProductBody(b: any): ProductBody {
   return {
     sku: str(b.sku, 40),
     name: str(b.name, 200),
@@ -622,7 +636,7 @@ on('POST', '/api/admin/products', (ctx) => {
 on('PATCH', '/api/admin/products/:id', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
   const id = int(ctx.params.id);
-  const cur = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+  const cur = db.prepare('SELECT * FROM products WHERE id = ?').get(id) as ProductRow | undefined;
   if (!cur) return ctx.fail('Бараа олдсонгүй', 404);
 
   // Хэсэгчилсэн засвар (жишээ нь зөвхөн үлдэгдэл/идэвх)
@@ -638,7 +652,7 @@ on('PATCH', '/api/admin/products/:id', (ctx) => {
 on('DELETE', '/api/admin/products/:id', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
   const id = int(ctx.params.id);
-  const used = db.prepare('SELECT COUNT(*) AS n FROM order_items WHERE product_id = ?').get(id).n;
+  const used = (db.prepare('SELECT COUNT(*) AS n FROM order_items WHERE product_id = ?').get(id) as { n: number }).n;
   if (used > 0) {
     db.prepare('UPDATE products SET active = 0 WHERE id = ?').run(id);
     return ctx.json({ ok: true, archived: true });
@@ -702,7 +716,7 @@ on('POST', '/api/admin/categories', (ctx) => {
   if (db.prepare('SELECT id FROM categories WHERE slug = ?').get(slug)) {
     return ctx.fail('Ийм slug бүртгэлтэй байна', 409);
   }
-  const maxSort = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM categories').get().m;
+  const maxSort = (db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM categories').get() as { m: number }).m;
   db.prepare('INSERT INTO categories(slug, name, kind, icon, sort) VALUES(?, ?, ?, ?, ?)')
     .run(slug, name, kind, str(ctx.body.icon, 20) || 'bottle', maxSort + 1);
   ctx.json({ ok: true });
@@ -711,7 +725,7 @@ on('POST', '/api/admin/categories', (ctx) => {
 on('DELETE', '/api/admin/categories/:id', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
   const id = int(ctx.params.id);
-  const n = db.prepare('SELECT COUNT(*) AS n FROM products WHERE category_id = ?').get(id).n;
+  const n = (db.prepare('SELECT COUNT(*) AS n FROM products WHERE category_id = ?').get(id) as { n: number }).n;
   if (n > 0) return ctx.fail(`Энэ ангилалд ${n} бараа байна. Эхлээд шилжүүлнэ үү.`, 409);
   db.prepare('DELETE FROM categories WHERE id = ?').run(id);
   ctx.json({ ok: true });
@@ -733,13 +747,13 @@ on('PATCH', '/api/admin/settings', (ctx) => {
 // ---------------------------------------------------------------------------
 // НУУЦ ҮГ СЭРГЭЭХ
 // ---------------------------------------------------------------------------
-const hashCode = (code) => crypto.createHash('sha256').update(String(code)).digest('hex');
+const hashCode = (code: string): string => crypto.createHash('sha256').update(String(code)).digest('hex');
 
 on('POST', '/api/auth/forgot', async (ctx) => {
   const phone = normPhone(ctx.body.phone);
   if (!validPhone(phone)) return ctx.fail('Утасны дугаар 8 оронтой байх ёстой', 400);
 
-  const user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+  const user = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone) as UserRow | undefined;
 
   // Хэрэглэгч байхгүй ч ижил хариу буцаана — дугаар бүртгэлтэй эсэхийг
   // гаднаас тандах боломжийг хаана.
@@ -754,7 +768,7 @@ on('POST', '/api/auth/forgot', async (ctx) => {
   // Хэт олон хүсэлтээс хамгаална — 1 минутад 1 удаа
   const recent = db.prepare(
     'SELECT created_at FROM password_resets WHERE phone = ? ORDER BY id DESC LIMIT 1'
-  ).get(phone);
+  ).get(phone) as { created_at: string } | undefined;
   if (recent && Date.now() - new Date(recent.created_at).getTime() < 60_000) {
     return ctx.fail('1 минутын дараа дахин оролдоно уу', 429);
   }
@@ -789,7 +803,7 @@ on('POST', '/api/auth/reset', (ctx) => {
   const row = db.prepare(`
     SELECT * FROM password_resets
     WHERE phone = ? AND used_at IS NULL
-    ORDER BY id DESC LIMIT 1`).get(phone);
+    ORDER BY id DESC LIMIT 1`).get(phone) as PasswordResetRow | undefined;
 
   if (!row) return ctx.fail('Сэргээх код олдсонгүй. Дахин хүсэлт илгээнэ үү.', 400);
   if (row.expires_at < Date.now()) return ctx.fail('Кодын хугацаа дууссан байна', 400);
@@ -809,7 +823,7 @@ on('POST', '/api/auth/reset', (ctx) => {
   db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.user_id);
 
   startSession(ctx, row.user_id);
-  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id) as unknown as UserRow;
   ctx.json({ ok: true, user: publicUser(u), message: 'Нууц үг шинэчлэгдлээ' });
 });
 
@@ -827,20 +841,20 @@ routes.push({
     const product = db.prepare('SELECT id FROM products WHERE id = ?').get(id);
     if (!product) return ctx.fail('Бараа олдсонгүй', 404);
 
-    let parsed;
+    let parsed: uploads.MultipartResult;
     try {
-      parsed = uploads.parseMultipart(ctx.rawBody, ctx.req.headers['content-type'] || '');
+      parsed = uploads.parseMultipart(ctx.rawBody!, ctx.req.headers['content-type'] || '');
     } catch (e) {
-      return ctx.fail('Файлыг уншиж чадсангүй: ' + e.message, 400);
+      return ctx.fail('Файлыг уншиж чадсангүй: ' + (e as Error).message, 400);
     }
     if (!parsed.files.length) return ctx.fail('Зураг сонгоно уу', 400);
 
-    const maxSort = db.prepare(
+    const maxSort = (db.prepare(
       'SELECT COALESCE(MAX(sort), -1) AS m FROM product_images WHERE product_id = ?'
-    ).get(id).m;
+    ).get(id) as { m: number }).m;
 
     const saved = [];
-    const errors = [];
+    const errors: string[] = [];
     let sort = maxSort + 1;
     for (const file of parsed.files) {
       try {
@@ -851,7 +865,7 @@ routes.push({
         ).run(id, info.file, info.mime, info.width, info.height, info.bytes, sort++, now());
         saved.push({ id: r.lastInsertRowid, url: `/img/u/${info.file}`, ...info });
       } catch (e) {
-        errors.push(`${file.filename}: ${e.message}`);
+        errors.push(`${file.filename}: ${(e as Error).message}`);
       }
     }
 
@@ -864,7 +878,8 @@ on('DELETE', '/api/admin/products/:id/images/:imageId', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
   const id = int(ctx.params.id);
   const imageId = int(ctx.params.imageId);
-  const img = db.prepare('SELECT * FROM product_images WHERE id = ? AND product_id = ?').get(imageId, id);
+  const img = db.prepare('SELECT * FROM product_images WHERE id = ? AND product_id = ?').get(imageId, id) as
+    ProductImageRow | undefined;
   if (!img) return ctx.fail('Зураг олдсонгүй', 404);
 
   db.prepare('DELETE FROM product_images WHERE id = ?').run(imageId);
@@ -876,25 +891,28 @@ on('DELETE', '/api/admin/products/:id/images/:imageId', (ctx) => {
 on('PATCH', '/api/admin/products/:id/images', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
   const id = int(ctx.params.id);
-  const order = Array.isArray(ctx.body.order) ? ctx.body.order : [];
+  const order: unknown[] = Array.isArray(ctx.body.order) ? ctx.body.order : [];
   if (!order.length) return ctx.fail('Эрэмбэ хоосон байна', 400);
 
   const upd = db.prepare('UPDATE product_images SET sort = ? WHERE id = ? AND product_id = ?');
   order.forEach((imageId, i) => upd.run(i, int(imageId), id));
-  ctx.json({ ok: true, images: listImages.all(id).map((im) => ({ ...im, url: `/img/u/${im.file}` })) });
+  ctx.json({
+    ok: true,
+    images: (listImages.all(id) as ProductImageRow[]).map((im) => ({ ...im, url: `/img/u/${im.file}` })),
+  });
 });
 
 // ---------------------------------------------------------------------------
 // ТАЙЛАН ТАТАХ (CSV)
 // ---------------------------------------------------------------------------
-const DELIVERY_MN = { ub: 'Хотод хүргэх', pickup: 'Өөрөө авах', country: 'Орон нутаг' };
-const PAYMENT_MN = { cash: 'Бэлнээр', transfer: 'Данс', qpay: 'QPay' };
-const STATUS_MN = {
+const DELIVERY_MN: Record<string, string> = { ub: 'Хотод хүргэх', pickup: 'Өөрөө авах', country: 'Орон нутаг' };
+const PAYMENT_MN: Record<string, string> = { cash: 'Бэлнээр', transfer: 'Данс', qpay: 'QPay' };
+const STATUS_MN: Record<string, string> = {
   new: 'Шинэ', confirmed: 'Баталгаажсан', packed: 'Савлагдсан',
   shipping: 'Хүргэлтэд', delivered: 'Хүргэгдсэн', cancelled: 'Цуцлагдсан',
 };
 
-function sendCsv(ctx, filename, headers, rows) {
+function sendCsv(ctx: Ctx, filename: string, headers: string[], rows: CsvValue[][]): void {
   const sep = ctx.query.sep === 'semicolon' ? ';' : ',';
   const buf = csv.toBuffer(headers, rows, sep);
   ctx.raw(buf, 'text/csv; charset=utf-8', 200, {
@@ -904,12 +922,12 @@ function sendCsv(ctx, filename, headers, rows) {
   });
 }
 
-const dateStamp = () => new Date().toISOString().slice(0, 10);
+const dateStamp = (): string => new Date().toISOString().slice(0, 10);
 
 on('GET', '/api/admin/export/orders.csv', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
-  const where = [];
-  const args = [];
+  const where: string[] = [];
+  const args: string[] = [];
   if (ctx.query.status && STATUSES.includes(ctx.query.status)) {
     where.push('o.status = ?'); args.push(ctx.query.status);
   }
@@ -917,11 +935,12 @@ on('GET', '/api/admin/export/orders.csv', (ctx) => {
   if (ctx.query.to) { where.push('o.created_at <= ?'); args.push(str(ctx.query.to, 30) + 'T23:59:59Z'); }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const orders = db.prepare(`SELECT * FROM orders o ${clause} ORDER BY o.created_at DESC`).all(...args);
+  const orders = db.prepare(`SELECT * FROM orders o ${clause} ORDER BY o.created_at DESC`).all(...args) as
+    unknown as OrderRow[];
   const getItems = db.prepare('SELECT name, sku, price, qty FROM order_items WHERE order_id = ?');
 
   const rows = orders.map((o) => {
-    const items = getItems.all(o.id);
+    const items = getItems.all(o.id) as Pick<OrderItemRow, 'name' | 'sku' | 'price' | 'qty'>[];
     return [
       o.code,
       o.created_at.slice(0, 10),
@@ -955,7 +974,8 @@ on('GET', '/api/admin/export/products.csv', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
   const items = db.prepare(`
     SELECT p.*, c.name AS category_name FROM products p
-    JOIN categories c ON c.id = p.category_id ORDER BY p.id`).all();
+    JOIN categories c ON c.id = p.category_id ORDER BY p.id`).all() as
+    unknown as (ProductRow & { category_name: string })[];
 
   const rows = items.map((p) => [
     p.id, p.sku, p.name, p.brand, p.category_name, p.price, p.compare_price || '',
@@ -976,7 +996,9 @@ on('GET', '/api/admin/export/customers.csv', (ctx) => {
            (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) AS orders,
            (SELECT COALESCE(SUM(total), 0) FROM orders o
              WHERE o.user_id = u.id AND o.status != 'cancelled') AS spent
-    FROM users u WHERE u.role = 'customer' ORDER BY spent DESC`).all();
+    FROM users u WHERE u.role = 'customer' ORDER BY spent DESC`).all() as
+    unknown as (Pick<UserRow, 'name' | 'phone' | 'email' | 'district' | 'address' | 'created_at'> &
+      { orders: number; spent: number })[];
 
   const rows = items.map((u) => [
     u.name, u.phone, u.email, u.district, u.address, u.orders, u.spent, u.created_at.slice(0, 10),
@@ -998,7 +1020,8 @@ on('GET', '/api/admin/export/sales.csv', (ctx) => {
            COALESCE(SUM(discount), 0) AS discount,
            COALESCE(SUM(total), 0) AS total
     FROM orders WHERE status != 'cancelled'
-    GROUP BY day ORDER BY day DESC`).all();
+    GROUP BY day ORDER BY day DESC`).all() as
+    { day: string; orders: number; subtotal: number; delivery: number; discount: number; total: number }[];
 
   sendCsv(ctx, `khishgee-borluulalt-${dateStamp()}.csv`,
     ['Өдөр', 'Захиалга', 'Барааны дүн', 'Хүргэлт', 'Хөнгөлөлт', 'Нийт орлого'],
@@ -1008,9 +1031,9 @@ on('GET', '/api/admin/export/sales.csv', (ctx) => {
 // ---------------------------------------------------------------------------
 // QPAY ТӨЛБӨР
 // ---------------------------------------------------------------------------
-function findOrderForPayment(ctx) {
+function findOrderForPayment(ctx: Ctx): OrderRow | null {
   const code = str(ctx.params.code, 30).toUpperCase();
-  const order = db.prepare('SELECT * FROM orders WHERE code = ?').get(code);
+  const order = db.prepare('SELECT * FROM orders WHERE code = ?').get(code) as OrderRow | undefined;
   if (!order) { ctx.fail('Захиалга олдсонгүй', 404); return null; }
 
   // Эзэмшигч эсэхийг шалгана: нэвтэрсэн эзэн, админ, эсвэл утас таарсан зочин
@@ -1021,7 +1044,7 @@ function findOrderForPayment(ctx) {
   return order;
 }
 
-function paymentPublic(row, extra = {}) {
+function paymentPublic(row: PaymentRow, extra: Record<string, unknown> = {}) {
   return {
     invoice_id: row.invoice_id,
     status: row.status,
@@ -1042,19 +1065,19 @@ on('POST', '/api/payments/qpay/:code', async (ctx) => {
   // Хүчинтэй нэхэмжлэх байвал дахин ашиглана
   const existing = db.prepare(
     "SELECT * FROM payments WHERE order_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1"
-  ).get(order.id);
+  ).get(order.id) as PaymentRow | undefined;
   if (existing && existing.amount === order.total) {
     return ctx.json({
       ok: true,
-      payment: paymentPublic(existing, { qr_svg: existing.qr_text ? require('./qr').toSvg(existing.qr_text, { scale: 6 }) : '' }),
+      payment: paymentPublic(existing, { qr_svg: existing.qr_text ? qr.toSvg(existing.qr_text, { scale: 6 }) : '' }),
     });
   }
 
-  let inv;
+  let inv: qpay.Invoice;
   try {
     inv = await qpay.createInvoice(order);
   } catch (e) {
-    console.error('[qpay]', e.message);
+    console.error('[qpay]', (e as Error).message);
     return ctx.fail('Төлбөрийн нэхэмжлэх үүсгэж чадсангүй. Дараа дахин оролдоно уу.', 502);
   }
 
@@ -1065,7 +1088,7 @@ on('POST', '/api/payments/qpay/:code', async (ctx) => {
   ).run(order.id, inv.mode, inv.invoiceId, inv.qrText || '', inv.shortUrl || '', order.total,
     JSON.stringify(inv.raw || {}).slice(0, 4000), now(), now());
 
-  const row = db.prepare('SELECT * FROM payments WHERE id = ?').get(res.lastInsertRowid);
+  const row = db.prepare('SELECT * FROM payments WHERE id = ?').get(res.lastInsertRowid) as unknown as PaymentRow;
   ctx.json({
     ok: true,
     payment: paymentPublic(row, {
@@ -1078,7 +1101,8 @@ on('POST', '/api/payments/qpay/:code', async (ctx) => {
 
 on('GET', '/api/payments/qpay/:code', async (ctx) => {
   const order = findOrderForPayment(ctx); if (!order) return;
-  const row = db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(order.id);
+  const row = db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(order.id) as
+    PaymentRow | undefined;
   if (!row) return ctx.json({ ok: true, payment: null, order_status: order.payment_status });
 
   // Live горимд QPay-аас баталгаажуулна
@@ -1087,16 +1111,17 @@ on('GET', '/api/payments/qpay/:code', async (ctx) => {
       const check = await qpay.checkPayment(row);
       if (check.paid) markPaid(order, row, check.amount, check.paymentId);
     } catch (e) {
-      console.error('[qpay check]', e.message);
+      console.error('[qpay check]', (e as Error).message);
     }
   }
 
-  const fresh = db.prepare('SELECT * FROM payments WHERE id = ?').get(row.id);
-  const freshOrder = db.prepare('SELECT payment_status FROM orders WHERE id = ?').get(order.id);
+  const fresh = db.prepare('SELECT * FROM payments WHERE id = ?').get(row.id) as unknown as PaymentRow;
+  const freshOrder = db.prepare('SELECT payment_status FROM orders WHERE id = ?').get(order.id) as
+    Pick<OrderRow, 'payment_status'>;
   ctx.json({ ok: true, payment: paymentPublic(fresh), order_status: freshOrder.payment_status });
 });
 
-function markPaid(order, payment, amount, paymentId) {
+function markPaid(order: OrderRow, payment: PaymentRow, amount: number, paymentId: string): OrderRow {
   const ts = now();
   db.prepare(
     "UPDATE payments SET status = 'paid', paid_amount = ?, payment_id = ?, updated_at = ? WHERE id = ?"
@@ -1108,7 +1133,7 @@ function markPaid(order, payment, amount, paymentId) {
   if (order.status === 'new') {
     db.prepare("UPDATE orders SET status = 'confirmed', updated_at = ? WHERE id = ?").run(ts, order.id);
   }
-  const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
+  const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id) as unknown as OrderRow;
   sms.sendSms(updated.phone,
     `${getSettings().store_name}\nЗахиалга ${updated.code}-ийн ${Number(updated.total).toLocaleString('mn-MN')}₮ төлбөр амжилттай хүлээн авлаа. Баярлалаа!`,
     { kind: 'status', orderId: updated.id });
@@ -1118,10 +1143,11 @@ function markPaid(order, payment, amount, paymentId) {
 // QPay callback — банкнаас ирнэ (нэвтрэлт шаардахгүй, гэхдээ шалгана)
 on('GET', '/api/payments/qpay-callback', async (ctx) => {
   const code = str(ctx.query.order, 30).toUpperCase();
-  const order = db.prepare('SELECT * FROM orders WHERE code = ?').get(code);
+  const order = db.prepare('SELECT * FROM orders WHERE code = ?').get(code) as OrderRow | undefined;
   if (!order) return ctx.fail('Захиалга олдсонгүй', 404);
 
-  const row = db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(order.id);
+  const row = db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(order.id) as
+    PaymentRow | undefined;
   if (!row) return ctx.fail('Нэхэмжлэх олдсонгүй', 404);
 
   // Callback-д хэзээ ч шууд итгэхгүй — QPay-аас өөрөөс нь дахин лавлана
@@ -1129,7 +1155,7 @@ on('GET', '/api/payments/qpay-callback', async (ctx) => {
     const check = await qpay.checkPayment(row);
     if (check.paid) markPaid(order, row, check.amount, check.paymentId);
   } catch (e) {
-    console.error('[qpay callback]', e.message);
+    console.error('[qpay callback]', (e as Error).message);
     return ctx.fail('Шалгах үед алдаа гарлаа', 502);
   }
   ctx.json({ ok: true });
@@ -1141,7 +1167,7 @@ on('POST', '/api/payments/qpay/:code/simulate', (ctx) => {
   const order = findOrderForPayment(ctx); if (!order) return;
   const row = db.prepare(
     "SELECT * FROM payments WHERE order_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1"
-  ).get(order.id);
+  ).get(order.id) as PaymentRow | undefined;
   if (!row) return ctx.fail('Хүлээгдэж буй нэхэмжлэх алга', 404);
 
   const updated = markPaid(order, row, row.amount, 'mock_' + crypto.randomBytes(4).toString('hex'));
@@ -1154,9 +1180,9 @@ on('POST', '/api/payments/qpay/:code/simulate', (ctx) => {
 on('GET', '/api/admin/sms', (ctx) => {
   const a = requireAdmin(ctx); if (!a) return;
   const items = db.prepare('SELECT * FROM sms_outbox ORDER BY id DESC LIMIT 200').all();
-  const stats = db.prepare(`
-    SELECT status, COUNT(*) AS n FROM sms_outbox GROUP BY status`).all()
-    .reduce((acc, r) => ({ ...acc, [r.status]: r.n }), {});
+  const stats = (db.prepare(`
+    SELECT status, COUNT(*) AS n FROM sms_outbox GROUP BY status`).all() as { status: string; n: number }[])
+    .reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: r.n }), {});
   ctx.json({ ok: true, items, stats, live: config.sms.live, provider: config.sms.provider });
 });
 
@@ -1199,4 +1225,4 @@ on('GET', '/api/admin/integrations', (ctx) => {
   });
 });
 
-module.exports = routes;
+export default routes;

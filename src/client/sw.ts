@@ -2,6 +2,9 @@
    Гар утасны сул сүлжээнд хурдан ажиллуулах зорилготой.
    Стратеги: статик файлыг сүлжээнээс эхэлж авах, амжилтгүй бол кэшээс. */
 
+// lib.webworker нь self-ийг ерөнхий worker гэж үздэг тул SW төрөл рүү нарийсгана
+const sw = self as unknown as ServiceWorkerGlobalScope;
+
 const VERSION = 'ks-v2';
 const SHELL = [
   '/',
@@ -11,23 +14,23 @@ const SHELL = [
   '/icons/icon-192.png',
 ];
 
-self.addEventListener('install', (e) => {
+sw.addEventListener('install', (e: ExtendableEvent) => {
   e.waitUntil(
     caches.open(VERSION)
       .then((c) => c.addAll(SHELL).catch(() => null))
-      .then(() => self.skipWaiting())
+      .then(() => sw.skipWaiting())
   );
 });
 
-self.addEventListener('activate', (e) => {
+sw.addEventListener('activate', (e: ExtendableEvent) => {
   e.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
+      .then(() => sw.clients.claim())
   );
 });
 
-self.addEventListener('fetch', (e) => {
+sw.addEventListener('fetch', (e: FetchEvent) => {
   const { request } = e;
   if (request.method !== 'GET') return;
 
@@ -44,7 +47,7 @@ self.addEventListener('fetch', (e) => {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(request, copy));
         return res;
-      }).catch(() => hit))
+      }).catch(() => hit as unknown as Response))
     );
     return;
   }
@@ -55,6 +58,6 @@ self.addEventListener('fetch', (e) => {
       const copy = res.clone();
       caches.open(VERSION).then((c) => c.put(request, copy));
       return res;
-    }).catch(() => caches.match(request).then((hit) => hit || caches.match('/')))
+    }).catch(() => caches.match(request).then((hit) => hit || caches.match('/') as Promise<Response>))
   );
 });

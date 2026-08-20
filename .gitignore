@@ -4,3 +4,7 @@ data/salon.db
 data/salon.db-shm
 data/salon.db-wal
 data/uploads/
+
+# TypeScript build гаралт (src/client -> public)
+public/js/
+public/sw.js

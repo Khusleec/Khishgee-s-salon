@@ -6,15 +6,19 @@
 > **Гар утас нэгдүгээрт.** Үйлчлүүлэгчид голчлон утаснаас ханддаг тул дэлгүүрийн
 > дизайн, урсгал бүхэн утсанд зориулж хийгдсэн — том дэлгэц нь өргөтгөл нь юм.
 
-**Гадаад сан ашиглаагүй** — Node.js-ийн дотоод модулиуд (`node:http`, `node:sqlite`,
-`node:crypto`, `node:zlib`) дээр бүтсэн тул `npm install` хийх шаардлагагүй, интернэтгүй ажиллана.
+**Гадаад ажиллагааны сан ашиглаагүй** — Node.js-ийн дотоод модулиуд (`node:http`, `node:sqlite`,
+`node:crypto`, `node:zlib`) дээр бүтсэн. Код бүхэлдээ **TypeScript**: сервер Node-ийн
+төрөл хасагч (type stripping)-аар `.ts` файлыг шууд ажиллуулна, харин хөтчийн скриптүүд
+(`src/client/`) `tsc`-ээр `public/` руу хөрвүүлэгдэнэ — тиймээс `typescript`-ийг татахын
+тулд нэг удаа `npm install` хийнэ.
 
 ---
 
 ## Эхлүүлэх
 
 ```bash
-npm start
+npm install     # typescript + @types/node (зөвхөн хөгжүүлэлтийн хамаарал)
+npm start       # эхлэхдээ хөтчийн скриптүүдийг автоматаар build хийнэ
 ```
 
 | Хаяг | Тайлбар |
@@ -48,9 +52,11 @@ ipconfig            # → жишээ нь 192.168.1.15
 ### Бусад команд
 
 ```bash
-npm run dev      # файл өөрчлөгдөхөд автоматаар дахин ачаална
-npm run reset    # мэдээллийн санг устгаад жишээ өгөгдлийг шинээр ачаална
-npm test         # 76 автомат тест (тусдаа түр DB дээр — жинхэнэ өгөгдөлд хүрэхгүй)
+npm run dev        # файл өөрчлөгдөхөд автоматаар дахин ачаална
+npm run build      # src/client доторх TS-ийг public/ руу хөрвүүлнэ
+npm run typecheck  # бүх TypeScript-ийг (сервер + клиент + тест) шалгана
+npm run reset      # мэдээллийн санг устгаад жишээ өгөгдлийг шинээр ачаална
+npm test           # 76 автомат тест (тусдаа түр DB дээр — жинхэнэ өгөгдөлд хүрэхгүй)
 PORT=8080 npm start
 ```
 
@@ -138,20 +144,25 @@ PORT=8080 npm start
 ## Техникийн шийдэл
 
 ```
-server/
-  index.js       HTTP сервер, router, статик файл, SPA fallback
-  api.js         Бүх API endpoint (нийтийн + админ)
-  db.js          SQLite схем, тохиргоо, жишээ өгөгдөл
-  auth.js        scrypt нууц үг + сешн токен
-  config.js      .env уншигч — QPay / SMS / зураг / нууц үг сэргээх тохиргоо
-  qpay.js        QPay v2 API (нэхэмжлэх, шалгах, callback) + mock горим
-  qr.js          QR код үүсгэгч (байт горим, EC-M, v1–20) — гадаад сангүй
-  sms.js         SMS илгээгч: mock / ерөнхий HTTP gateway / Twilio, outbox бүртгэл
-  uploads.js     multipart задлагч + magic-bytes зургийн шалгалт (JPG/PNG/WebP/GIF)
-  csv.js         CSV үүсгэгч — UTF-8 BOM, томьёо тарилгын хамгаалалт
-  images.js      Барааны зургийг SVG-ээр үүсгэнэ
-  icons.js       PWA дүрсийг PNG-ээр кодоор зурна (zlib + гараар угсарсан PNG)
-  seed-data.js   Бүтээгдэхүүн, ангилал, урамшууллын өгөгдөл
+server/          (TypeScript — Node шууд ажиллуулна, build шаардахгүй)
+  index.ts       HTTP сервер, router, статик файл, SPA fallback
+  api.ts         Бүх API endpoint (нийтийн + админ)
+  types.ts       Дундын төрлүүд — Ctx/Route + өгөгдлийн сангийн мөрүүд
+  db.ts          SQLite схем, тохиргоо, жишээ өгөгдөл
+  auth.ts        scrypt нууц үг + сешн токен
+  config.ts      .env уншигч — QPay / SMS / зураг / нууц үг сэргээх тохиргоо
+  qpay.ts        QPay v2 API (нэхэмжлэх, шалгах, callback) + mock горим
+  qr.ts          QR код үүсгэгч (байт горим, EC-M, v1–20) — гадаад сангүй
+  sms.ts         SMS илгээгч: mock / ерөнхий HTTP gateway / Twilio, outbox бүртгэл
+  uploads.ts     multipart задлагч + magic-bytes зургийн шалгалт (JPG/PNG/WebP/GIF)
+  csv.ts         CSV үүсгэгч — UTF-8 BOM, томьёо тарилгын хамгаалалт
+  images.ts      Барааны зургийг SVG-ээр үүсгэнэ
+  icons.ts       PWA дүрсийг PNG-ээр кодоор зурна (zlib + гараар угсарсан PNG)
+  seed-data.ts   Бүтээгдэхүүн, ангилал, урамшууллын өгөгдөл
+src/client/      (TypeScript эх — `npm run build` нь public/ руу хөрвүүлнэ)
+  js/app.ts      Дэлгүүрийн SPA → public/js/app.js
+  js/admin.ts    Админ SPA → public/js/admin.js
+  sw.ts          Service worker → public/sw.js
 public/
   index.html     Дэлгүүрийн бүрхүүл + SVG icon sprite
   admin.html     Админ бүрхүүл
@@ -159,13 +170,12 @@ public/
   css/mobile.css Гар утасны давхарга — дэлгүүрийн гол туршлага
   css/admin.css  Админы нэмэлт хэсэг
   css/admin-mobile.css  Админы гар утасны давхарга (хүснэгт → карт)
-  js/app.js      Дэлгүүрийн SPA
-  js/admin.js    Админ SPA
-  sw.js          Service worker
+  js/ + sw.js    Хөрвүүлсэн гаралт (git-д орохгүй)
   manifest.webmanifest
 data/salon.db    SQLite сан (автоматаар үүснэ)
 data/uploads/    Байршуулсан барааны зураг
 test/            Автомат тест (qr · api · ui) — npm test
+tsconfig*.json   TS тохиргоо: сервер/тест · app · admin · sw
 .env.example     Тохиргооны загвар — .env болгож хуулна
 ```
 

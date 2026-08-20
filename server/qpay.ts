@@ -1,5 +1,3 @@
-'use strict';
-
 // ---------------------------------------------------------------------------
 // QPay v2 холболт
 //
@@ -14,14 +12,15 @@
 //   cancelInvoice(payment)
 // ---------------------------------------------------------------------------
 
-const crypto = require('node:crypto');
-const cfg = require('./config');
-const qr = require('./qr');
+import crypto from 'node:crypto';
+import * as cfg from './config.ts';
+import * as qr from './qr.ts';
+import type { OrderRow, PaymentRow } from './types.ts';
 
 // ------------------------------ Токен кэш -----------------------------------
 let tokenCache = { value: '', expiresAt: 0 };
 
-async function getToken() {
+export async function getToken(): Promise<string> {
   if (tokenCache.value && Date.now() < tokenCache.expiresAt - 60_000) return tokenCache.value;
 
   const auth = Buffer.from(`${cfg.qpay.username}:${cfg.qpay.password}`).toString('base64');
@@ -41,7 +40,7 @@ async function getToken() {
   return tokenCache.value;
 }
 
-async function call(path, body, method = 'POST') {
+async function call(path: string, body: unknown, method = 'POST'): Promise<any> {
   const token = await getToken();
   const res = await fetch(`${cfg.qpay.baseUrl}${path}`, {
     method,
@@ -54,11 +53,22 @@ async function call(path, body, method = 'POST') {
 }
 
 // ------------------------------ Нэхэмжлэх -----------------------------------
+export type Invoice = {
+  mode: 'mock' | 'live';
+  invoiceId: string;
+  qrText: string;
+  qrSvg: string;
+  qrImageBase64?: string;
+  shortUrl: string;
+  urls: unknown[];
+  raw?: unknown;
+};
+
 /**
  * Захиалгад QPay нэхэмжлэх үүсгэнэ.
- * @param {object} order  orders хүснэгтийн мөр
+ * @param order orders хүснэгтийн мөр
  */
-async function createInvoice(order) {
+export async function createInvoice(order: OrderRow): Promise<Invoice> {
   const callbackUrl = `${cfg.qpay.callbackBase}/api/payments/qpay-callback?order=${encodeURIComponent(order.code)}`;
 
   if (!cfg.qpay.live) {
@@ -108,11 +118,18 @@ async function createInvoice(order) {
   };
 }
 
+export type PaymentCheck = {
+  paid: boolean;
+  amount: number;
+  paymentId: string;
+  raw: unknown;
+};
+
 /**
  * Төлбөр төлөгдсөн эсэхийг шалгана.
- * @param {object} payment  payments хүснэгтийн мөр
+ * @param payment payments хүснэгтийн мөр
  */
-async function checkPayment(payment) {
+export async function checkPayment(payment: PaymentRow): Promise<PaymentCheck> {
   if (payment.mode !== 'live' || !cfg.qpay.live) {
     // mock — DB дэх төлөв нь эцсийн үнэн
     return {
@@ -129,7 +146,7 @@ async function checkPayment(payment) {
     offset: { page_number: 1, page_limit: 100 },
   });
 
-  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const rows: any[] = Array.isArray(data.rows) ? data.rows : [];
   const paidRows = rows.filter((r) => String(r.payment_status).toUpperCase() === 'PAID');
   const amount = paidRows.reduce((sum, r) => sum + Number(r.payment_amount || 0), 0);
 
@@ -141,10 +158,10 @@ async function checkPayment(payment) {
   };
 }
 
-async function cancelInvoice(payment) {
+export async function cancelInvoice(payment: PaymentRow): Promise<{ ok: boolean; mock?: boolean }> {
   if (payment.mode !== 'live' || !cfg.qpay.live || !payment.invoice_id) return { ok: true, mock: true };
   await call(`/invoice/${encodeURIComponent(payment.invoice_id)}`, null, 'DELETE');
   return { ok: true };
 }
 
-module.exports = { createInvoice, checkPayment, cancelInvoice, getToken, isLive: () => cfg.qpay.live };
+export const isLive = (): boolean => cfg.qpay.live;

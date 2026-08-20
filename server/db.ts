@@ -1,16 +1,15 @@
-'use strict';
-
-const path = require('node:path');
-const fs = require('node:fs');
-const { DatabaseSync } = require('node:sqlite');
-const { hashPassword } = require('./auth');
-const seed = require('./seed-data');
+import path from 'node:path';
+import fs from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { hashPassword } from './auth.ts';
+import * as seed from './seed-data.ts';
+import type { CategoryRow, ProductRow, UserRow } from './types.ts';
 
 // KS_DATA_DIR — тест болон тусдаа байршуулалтад өөр хавтас заах боломж
-const DATA_DIR = process.env.KS_DATA_DIR || path.join(__dirname, '..', 'data');
+const DATA_DIR = process.env.KS_DATA_DIR || path.join(import.meta.dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new DatabaseSync(path.join(DATA_DIR, 'salon.db'));
+export const db = new DatabaseSync(path.join(DATA_DIR, 'salon.db'));
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 
@@ -191,8 +190,8 @@ CREATE INDEX IF NOT EXISTS idx_sms_created     ON sms_outbox(created_at);
 // ---------------------------------------------------------------------------
 // Хувилбар ахиулах — хуучин сан дээр дутуу баганыг нэмнэ
 // ---------------------------------------------------------------------------
-function addColumn(table, column, definition) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+function addColumn(table: string, column: string, definition: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (cols.some((c) => c.name === column)) return false;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   return true;
@@ -204,7 +203,7 @@ addColumn('orders', 'paid_at', 'TEXT');
 // ---------------------------------------------------------------------------
 // Тохиргоо
 // ---------------------------------------------------------------------------
-const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS: Record<string, string> = {
   store_name: "Khishgee's Salon",
   tagline: 'Мэргэжлийн үс, хумсны бүтээгдэхүүн',
   phone: '7000-8080',
@@ -220,14 +219,14 @@ const DEFAULT_SETTINGS = {
   instagram: '@khishgee.salon',
 };
 
-function getSettings() {
-  const rows = db.prepare('SELECT key, value FROM settings').all();
+export function getSettings(): Record<string, string> {
+  const rows = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
   const out = { ...DEFAULT_SETTINGS };
   for (const r of rows) out[r.key] = r.value;
   return out;
 }
 
-function setSetting(key, value) {
+export function setSetting(key: string, value: string | number): void {
   db.prepare(
     'INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
   ).run(key, String(value));
@@ -236,7 +235,7 @@ function setSetting(key, value) {
 // ---------------------------------------------------------------------------
 // Тогтмол санамсаргүй тоо (демо өгөгдөл давтагдах боломжтой байх)
 // ---------------------------------------------------------------------------
-function makeRng(seedNum) {
+function makeRng(seedNum: number): () => number {
   let s = seedNum >>> 0;
   return () => {
     s = (s * 1664525 + 1013904223) >>> 0;
@@ -244,7 +243,7 @@ function makeRng(seedNum) {
   };
 }
 
-const isoDaysAgo = (days, hour = 12) => {
+const isoDaysAgo = (days: number, hour = 12): string => {
   const d = new Date(Date.now() - days * 86400000);
   d.setHours(hour, (days * 7) % 60, 0, 0);
   return d.toISOString();
@@ -253,8 +252,8 @@ const isoDaysAgo = (days, hour = 12) => {
 // ---------------------------------------------------------------------------
 // Эх өгөгдөл
 // ---------------------------------------------------------------------------
-function seedDatabase() {
-  const already = db.prepare('SELECT COUNT(*) AS n FROM products').get().n;
+export function seedDatabase(): boolean {
+  const already = (db.prepare('SELECT COUNT(*) AS n FROM products').get() as { n: number }).n;
   if (already > 0) return false;
 
   const now = new Date().toISOString();
@@ -263,8 +262,10 @@ function seedDatabase() {
   );
   for (const c of seed.categories) insCat.run(c.slug, c.name, c.kind, c.icon, c.sort);
 
-  const catId = {};
-  for (const c of db.prepare('SELECT id, slug FROM categories').all()) catId[c.slug] = c.id;
+  const catId: Record<string, number> = {};
+  for (const c of db.prepare('SELECT id, slug FROM categories').all() as Pick<CategoryRow, 'id' | 'slug'>[]) {
+    catId[c.slug] = c.id;
+  }
 
   const insProd = db.prepare(`
     INSERT INTO products(sku, name, brand, category_id, price, compare_price, stock, hue, shape,
@@ -290,7 +291,7 @@ function seedDatabase() {
   );
   insUser.run('Админ', '99112233', 'admin@khishgee.mn', hashPassword('admin123'), 'admin', '', '', now);
 
-  const demoCustomers = [
+  const demoCustomers: [string, string, string, string][] = [
     ['Б. Сарантуяа', '88112244', 'saraa@example.mn', 'Баянзүрх дүүрэг'],
     ['Э. Номин', '99553311', 'nomin@example.mn', 'Хан-Уул дүүрэг'],
     ['Г. Хулан', '95441122', 'khulan@example.mn', 'Сүхбаатар дүүрэг'],
@@ -308,7 +309,7 @@ function seedDatabase() {
     '5-р хороо, 32-р байр, 14 тоот', 'Сүхбаатар дүүрэг', isoDaysAgo(60));
 
   // -- Сэтгэгдэл --------------------------------------------------------------
-  const prods = db.prepare('SELECT id FROM products').all();
+  const prods = db.prepare('SELECT id FROM products').all() as { id: number }[];
   const insRev = db.prepare(
     'INSERT INTO reviews(product_id, user_id, name, rating, comment, created_at) VALUES(?, NULL, ?, ?, ?, ?)'
   );
@@ -322,8 +323,8 @@ function seedDatabase() {
   });
 
   // -- Демо захиалгууд --------------------------------------------------------
-  const allProducts = db.prepare('SELECT * FROM products').all();
-  const customers = db.prepare("SELECT * FROM users WHERE role='customer'").all();
+  const allProducts = db.prepare('SELECT * FROM products').all() as unknown as ProductRow[];
+  const customers = db.prepare("SELECT * FROM users WHERE role='customer'").all() as unknown as UserRow[];
   const districts = ['Баянзүрх дүүрэг', 'Хан-Уул дүүрэг', 'Сүхбаатар дүүрэг', 'Баянгол дүүрэг',
     'Чингэлтэй дүүрэг', 'Сонгинохайрхан дүүрэг'];
   const statuses = ['delivered', 'delivered', 'delivered', 'shipping', 'packed', 'confirmed', 'new', 'cancelled'];
@@ -346,7 +347,7 @@ function seedDatabase() {
     const daysAgo = Math.floor(rng() * 45);
     const cust = customers[Math.floor(rng() * customers.length)];
     const itemCount = 1 + Math.floor(rng() * 3);
-    const picks = [];
+    const picks: ProductRow[] = [];
     for (let k = 0; k < itemCount; k++) {
       const p = allProducts[Math.floor(rng() * allProducts.length)];
       if (!picks.find((x) => x.id === p.id)) picks.push(p);
@@ -372,5 +373,3 @@ function seedDatabase() {
 
   return true;
 }
-
-module.exports = { db, seedDatabase, getSettings, setSetting, DEFAULT_SETTINGS };

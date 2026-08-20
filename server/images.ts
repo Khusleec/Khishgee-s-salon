@@ -1,14 +1,22 @@
-'use strict';
-
 // ---------------------------------------------------------------------------
 // Бүтээгдэхүүний зургийг SVG-ээр үүсгэнэ (гадаад файл, интернэт шаардахгүй).
 // hue = 0..360, shape = bottle | jar | tube | spray | drop | polish | tool | set
 // ---------------------------------------------------------------------------
 
-const esc = (s) => String(s).replace(/[<>&"']/g, (c) =>
-  ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = (s: unknown): string => String(s).replace(/[<>&"']/g, (c) =>
+  ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
-function palette(hue) {
+type Palette = {
+  bgA: string;
+  bgB: string;
+  deep: string;
+  mid: string;
+  light: string;
+  cap: string;
+  capHi: string;
+};
+
+function palette(hue: number | string): Palette {
   const h = ((Number(hue) || 300) % 360 + 360) % 360;
   return {
     bgA: `hsl(${h} 46% 95%)`,
@@ -21,7 +29,7 @@ function palette(hue) {
   };
 }
 
-function shapeBody(shape, c) {
+function shapeBody(shape: string, c: Palette): string {
   switch (shape) {
     case 'jar':
       return `
@@ -96,7 +104,14 @@ function shapeBody(shape, c) {
   }
 }
 
-function productSvg({ hue = 300, shape = 'bottle', label = '', brand = '' } = {}) {
+export type ProductSvgOpts = {
+  hue?: number | string;
+  shape?: string;
+  label?: string;
+  brand?: string;
+};
+
+export function productSvg({ hue = 300, shape = 'bottle', label = '', brand = '' }: ProductSvgOpts = {}): string {
   const c = palette(hue);
   const initials = esc(String(brand).trim().slice(0, 2).toUpperCase());
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600" role="img" aria-label="${esc(label)}">
@@ -128,5 +143,3 @@ function productSvg({ hue = 300, shape = 'bottle', label = '', brand = '' } = {}
         letter-spacing="6" fill="${c.deep}" opacity=".42">${initials}</text>
 </svg>`;
 }
-
-module.exports = { productSvg };
